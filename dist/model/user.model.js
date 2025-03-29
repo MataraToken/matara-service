@@ -9,6 +9,9 @@ const userSchema = new mongoose_1.default.Schema({
         type: String,
         required: true,
     },
+    firstName: {
+        type: String,
+    },
     level: {
         type: Number,
         default: 1,

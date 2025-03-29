@@ -34,14 +34,6 @@ const getProfilePicture = async (userId) => {
                 return fileUrl;
             }
         }
-        // if (photos.total_count > 0) {
-        //   const fileId = photos.photos[0][0].file_id;
-        //   const file = await bot.telegram.getFile(fileId);
-        //   const profilePictureUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-        //   console.log("Profile Picture URL:", profilePictureUrl); // Add this line
-        //   return profilePictureUrl;
-        // }
-        // return null;
     }
     catch (error) {
         console.error("Error getting profile photo:", error);
@@ -50,7 +42,9 @@ const getProfilePicture = async (userId) => {
 };
 // Start command
 bot.start(async (ctx) => {
+    console.log(ctx.from);
     const referralCode = ctx.payload;
+    const firstName = ctx.from.first_name;
     const username = ctx.from.username;
     const profilePicture = await getProfilePicture(ctx.from.id);
     const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/v1726351913/bannerflow_pnnugl.png";
@@ -64,26 +58,22 @@ bot.start(async (ctx) => {
                 username,
                 referralCode,
                 profilePicture,
+                firstName
             });
             if (res.status === 200 || res.status === 201) {
                 ctx.replyWithPhoto({ url: imageUrl }, {
-                    caption: `Welcome to Sunflower Brawl Bot 🌻, @${ctx.from.username}! \nSunflower Brawl is Tap to Earn game, earn in-game currency, and eventually receive a real token that will have value on the exchange.`,
+                    caption: `🌟 Welcome to Matara! 🚀 @${ctx.from.username} \nMatara is more than just a cryptocurrency—it’s a movement! Built on blockchain technology, Matara helps you discover your true essence and live with purpose. 🌍✨ \n\n
+🔹 Send & receive Matara seamlessly
+🔹 Stake Matara 
+🔹 Stay updated on community events
+🔹 Join a purpose-driven network \nTap Get Started below and begin your journey with Matara today! 🔥👇`,
                     reply_markup: {
                         inline_keyboard: [
                             [
-                                telegraf_1.Markup.button.url("Join community", `https://t.me/sunflower_coin`),
+                                telegraf_1.Markup.button.webApp("Start now!", `https://7dvfrf1x-5173.uks1.devtunnels.ms/`),
                             ],
                             [
-                                telegraf_1.Markup.button.url("Sunflower on X", "https://www.x.com/Sunflower_Coin"),
-                            ],
-                            // [
-                            //   Markup.button.webApp(
-                            //     "Test Brawl now!",
-                            //     `https://23d8-102-90-65-72.ngrok-free.app`
-                            //   ),
-                            // ],
-                            [
-                                telegraf_1.Markup.button.webApp("Brawl now!", `https://sunflowercoin.xyz/`),
+                                telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
                             ],
                         ],
                     },

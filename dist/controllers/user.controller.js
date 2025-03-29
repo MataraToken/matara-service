@@ -8,7 +8,7 @@ const utils_1 = require("../utils");
 const user_model_1 = __importDefault(require("../model/user.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
 const registerUser = async (req, res) => {
-    const { username, referralCode, premium, profilePicture } = req.body;
+    const { username, referralCode, premium, profilePicture, firstName } = req.body;
     try {
         // Check if the username already exists
         const alreadyExists = (await user_model_1.default.findOne({ username }));
@@ -23,6 +23,7 @@ const registerUser = async (req, res) => {
             referralCode: newReferralId,
             premium,
             profilePicture,
+            firstName
         });
         // Save the new user
         await newUser.save();
