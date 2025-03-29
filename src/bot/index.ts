@@ -59,7 +59,7 @@ bot.start(async (ctx) => {
   const username = ctx.from.username;
   const profilePicture = await getProfilePicture(ctx.from.id);
   const imageUrl =
-    "https://res.cloudinary.com/wallnet/image/upload/v1726351913/bannerflow_pnnugl.png";
+    "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
   console.log(username, "username");
   if (!username) {
     return ctx.reply(
