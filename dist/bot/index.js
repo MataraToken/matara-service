@@ -71,7 +71,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                     reply_markup: {
                         inline_keyboard: [
                             [
-                                telegraf_1.Markup.button.webApp("Start now!", `https://7dvfrf1x-5173.uks1.devtunnels.ms/`),
+                                telegraf_1.Markup.button.webApp("Start now!", `https://matara-tma.vercel.app/`),
                             ],
                             [
                                 telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),

@@ -89,7 +89,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                 [
                   Markup.button.webApp(
                     "Start now!",
-                    `https://7dvfrf1x-5173.uks1.devtunnels.ms/`
+                    `https://matara-tma.vercel.app/`
                   ),
                 ],
                 [
