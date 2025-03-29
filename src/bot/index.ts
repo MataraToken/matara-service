@@ -82,7 +82,8 @@ bot.start(async (ctx) => {
 🔹 Send & receive Matara seamlessly
 🔹 Stake Matara 
 🔹 Stay updated on community events
-🔹 Join a purpose-driven network \nTap Get Started below and begin your journey with Matara today! 🔥👇`,
+🔹 Join a purpose-driven network \n\n
+Tap Get Started below and begin your journey with Matara today! 🔥👇`,
             reply_markup: {
               inline_keyboard: [
                 [
