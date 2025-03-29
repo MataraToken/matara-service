@@ -47,7 +47,7 @@ bot.start(async (ctx) => {
     const firstName = ctx.from.first_name;
     const username = ctx.from.username;
     const profilePicture = await getProfilePicture(ctx.from.id);
-    const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/v1726351913/bannerflow_pnnugl.png";
+    const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
     console.log(username, "username");
     if (!username) {
         return ctx.reply("Please set a username in your Telegram account settings to proceed.");
@@ -66,7 +66,8 @@ bot.start(async (ctx) => {
 🔹 Send & receive Matara seamlessly
 🔹 Stake Matara 
 🔹 Stay updated on community events
-🔹 Join a purpose-driven network \nTap Get Started below and begin your journey with Matara today! 🔥👇`,
+🔹 Join a purpose-driven network \n\n
+Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                     reply_markup: {
                         inline_keyboard: [
                             [
