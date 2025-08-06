@@ -11,9 +11,9 @@ const port = process.env.PORT || 4000;
 import userRoute from "./routes/user.route";
 import taskRouter from "./routes/task.route";
 import pingRouter from "./routes/ping.route";
-import milestoneRouter from './routes/milestones.route'
-import boostRouter from './routes/boosts.route'
-import bonusRouter from './routes/bonus.route'
+import milestoneRouter from './routes/milestones.route';
+import boostRouter from './routes/boosts.route';
+import bonusRouter from './routes/bonus.route';
 // import cabalRouter from "./routes/cabal.route";
 
 //express app

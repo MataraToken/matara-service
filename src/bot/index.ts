@@ -12,7 +12,7 @@ const getProfilePicture = async (userId: any) => {
     const photosResponse = await axios.get(
       `https://api.telegram.org/bot${token}/getUserProfilePhotos`,
       {
-        params: {
+        params: { 
           user_id: userId,
         },
       }
@@ -44,7 +44,6 @@ const getProfilePicture = async (userId: any) => {
         return fileUrl;
       }
     }
-
   } catch (error) {
     console.error("Error getting profile photo:", error);
     return null;
@@ -53,9 +52,9 @@ const getProfilePicture = async (userId: any) => {
 
 // Start command
 bot.start(async (ctx) => {
-  console.log(ctx.from)
+  console.log(ctx.from);
   const referralCode = ctx.payload;
-  const firstName = ctx.from.first_name
+  const firstName = ctx.from.first_name;
   const username = ctx.from.username;
   const profilePicture = await getProfilePicture(ctx.from.id);
   const imageUrl =
@@ -71,7 +70,7 @@ bot.start(async (ctx) => {
         username,
         referralCode,
         profilePicture,
-        firstName
+        firstName,
       });
 
       if (res.status === 200 || res.status === 201) {
@@ -98,9 +97,6 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                     `https://t.me/FTLDOfficial`
                   ),
                 ],
-               
-
-               
               ],
             },
           }
