@@ -19,17 +19,22 @@ const app = express();
 const port = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const RENDER_URL = process.env.SERVER_URL;
+const TELEGRAM_WEBHOOK_PATH = process.env.BOT_WEBHOOK_PATH;
 
 if (!process.env.TELEGRAM_BOT_TOKEN) {
   throw new Error("TELEGRAM_BOT_TOKEN is required");
 }
 
-const generateWebhookPath = () => {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const hash = crypto.createHash('sha256').update(botToken!).digest('hex').substring(0, 32);
-  return `/telegraf/${hash}`;
-};
-const webhookPath = generateWebhookPath();
+if (!RENDER_URL) {
+  throw new Error("SERVER_URL is required");
+}
+
+if(!TELEGRAM_WEBHOOK_PATH) {
+  throw new Error("TELEGRAM_WEBHOOK_URL is required");
+}
+
+
+const webhookPath = `/telegraf/${TELEGRAM_WEBHOOK_PATH}`;
 
 app.use(cors({ origin: true }));
 app.use(express.json());

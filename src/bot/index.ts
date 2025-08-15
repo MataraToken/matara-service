@@ -65,7 +65,7 @@ bot.catch((err, ctx) => {
 
 // Start command
 bot.start(async (ctx) => {
-  try {
+  try { 
     console.log("User started bot:", ctx.from);
     
     const referralCode = ctx.payload || "";
