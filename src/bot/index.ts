@@ -12,7 +12,7 @@ const getProfilePicture = async (userId: any) => {
     const photosResponse = await axios.get(
       `https://api.telegram.org/bot${token}/getUserProfilePhotos`,
       {
-        params: { 
+        params: {
           user_id: userId,
         },
       }
@@ -57,6 +57,7 @@ bot.start(async (ctx) => {
   const firstName = ctx.from.first_name;
   const username = ctx.from.username;
   const profilePicture = await getProfilePicture(ctx.from.id);
+  const weburl = "https://6933d99f3b9a.ngrok-free.app"
   const imageUrl =
     "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
   console.log(username, "username");
@@ -88,7 +89,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                 [
                   Markup.button.webApp(
                     "Start now!",
-                    `https://6933d99f3b9a.ngrok-free.app`
+                    `${weburl}/start?username=${ctx.from.username}&referralCode=${referralCode}`
                   ),
                 ],
                 [
@@ -102,6 +103,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
           }
         );
       }
+      console.log("web url", )
     } catch (error) {
       console.log("Error registering user:", error);
       // ctx.reply("Internal server error");
