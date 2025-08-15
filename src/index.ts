@@ -24,8 +24,10 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const RENDER_URL = process.env.SERVER_URL; // e.g., https://your-app.onrender.com
 
 // Generate a secure random path for webhook
-const secretPath = `/telegraf/${crypto.randomBytes(20).toString("hex")}`;
-
+const secretPath =
+  NODE_ENV === "production"
+    ? `/telegraf/${process.env.BOT_WEBHOOK_PATH || "default-webhook"}`
+    : `/telegraf/${Math.random().toString(36).substring(2)}`;
 // Middleware setup
 app.use(cors({ origin: true }));
 app.use(express.json());
