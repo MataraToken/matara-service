@@ -47,6 +47,7 @@ bot.start(async (ctx) => {
     const firstName = ctx.from.first_name;
     const username = ctx.from.username;
     const profilePicture = await getProfilePicture(ctx.from.id);
+    const weburl = "https://6933d99f3b9a.ngrok-free.app";
     const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
     console.log(username, "username");
     if (!username) {
@@ -58,7 +59,7 @@ bot.start(async (ctx) => {
                 username,
                 referralCode,
                 profilePicture,
-                firstName
+                firstName,
             });
             if (res.status === 200 || res.status === 201) {
                 ctx.replyWithPhoto({ url: imageUrl }, {
@@ -71,7 +72,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                     reply_markup: {
                         inline_keyboard: [
                             [
-                                telegraf_1.Markup.button.webApp("Start now!", `https://matara-tma.vercel.app/`),
+                                telegraf_1.Markup.button.webApp("Start now!", `${weburl}/start?username=${ctx.from.username}&referralCode=${referralCode}`),
                             ],
                             [
                                 telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
@@ -80,6 +81,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                     },
                 });
             }
+            console.log("web url");
         }
         catch (error) {
             console.log("Error registering user:", error);
