@@ -88,7 +88,7 @@ Tap Get Started below and begin your journey with Matara today! 🔥👇`,
                 [
                   Markup.button.webApp(
                     "Start now!",
-                    `https://matara-tma.vercel.app/`
+                    `https://6933d99f3b9a.ngrok-free.app`
                   ),
                 ],
                 [
