@@ -4,13 +4,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const telegraf_1 = require("telegraf");
+const axios_1 = __importDefault(require("axios"));
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const serverUrl = process.env.SERVER_URL;
+if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN is required");
+}
+if (!serverUrl) {
+    throw new Error("SERVER_URL is required");
+}
 const bot = new telegraf_1.Telegraf(token);
-const axios_1 = __importDefault(require("axios"));
 const getProfilePicture = async (userId) => {
     try {
-        // const photos = await bot.telegram.getUserProfilePhotos(userId);
         const photosResponse = await axios_1.default.get(`https://api.telegram.org/bot${token}/getUserProfilePhotos`, {
             params: {
                 user_id: userId,
@@ -29,7 +34,6 @@ const getProfilePicture = async (userId) => {
             });
             if (fileResponse.data.ok) {
                 const filePath = fileResponse.data.result.file_path;
-                // Step 3: Construct the Download URL
                 const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
                 return fileUrl;
             }
@@ -39,64 +43,99 @@ const getProfilePicture = async (userId) => {
         console.error("Error getting profile photo:", error);
         return null;
     }
+    return null;
 };
+// Error handler middleware
+bot.catch((err, ctx) => {
+    console.error(`Bot error for ${ctx.updateType}:`, err);
+});
 // Start command
 bot.start(async (ctx) => {
-    console.log(ctx.from);
-    const referralCode = ctx.payload;
-    const firstName = ctx.from.first_name;
-    const username = ctx.from.username;
-    const profilePicture = await getProfilePicture(ctx.from.id);
-    const weburl = "https://6933d99f3b9a.ngrok-free.app";
-    const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
-    console.log(username, "username");
-    if (!username) {
-        return ctx.reply("Please set a username in your Telegram account settings to proceed.");
-    }
-    else {
-        try {
-            const res = await axios_1.default.post(`${serverUrl}/api/user/register`, {
-                username,
-                referralCode,
-                profilePicture,
-                firstName,
-            });
-            if (res.status === 200 || res.status === 201) {
-                ctx.replyWithPhoto({ url: imageUrl }, {
-                    caption: `🌟 Welcome to Matara! 🚀 @${ctx.from.username} \nMatara is more than just a cryptocurrency—it’s a movement! Built on blockchain technology, Matara helps you discover your true essence and live with purpose. 🌍✨ \n\n
-🔹 Send & receive Matara seamlessly
-🔹 Stake Matara 
-🔹 Stay updated on community events
-🔹 Join a purpose-driven network \n\n
-Tap Get Started below and begin your journey with Matara today! 🔥👇`,
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                telegraf_1.Markup.button.webApp("Start now!", `${weburl}/start?username=${ctx.from.username}&referralCode=${referralCode}`),
-                            ],
-                            [
-                                telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
-                            ],
+    try {
+        console.log("User started bot:", ctx.from);
+        const referralCode = ctx.payload || "";
+        const firstName = ctx.from?.first_name || "";
+        const username = ctx.from?.username;
+        if (!username) {
+            return ctx.reply("Please set a username in your Telegram account settings to proceed.");
+        }
+        const profilePicture = await getProfilePicture(ctx.from.id);
+        // Use your actual web app URL here instead of ngrok
+        const weburl = process.env.WEB_APP_URL || "https://your-webapp-domain.com";
+        const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
+        console.log(`Registering user: ${username}`);
+        const res = await axios_1.default.post(`${serverUrl}/api/user/register`, {
+            username,
+            referralCode,
+            profilePicture,
+            firstName,
+        });
+        if (res.status === 200 || res.status === 201) {
+            await ctx.replyWithPhoto({ url: imageUrl }, {
+                caption: `🌟 Welcome to Matara! 🚀 @${username} \nMatara is more than just a cryptocurrency—it's a movement! Built on blockchain technology, Matara helps you discover your true essence and live with purpose. 🌍✨ \n\n🔹 Send & receive Matara seamlessly\n🔹 Stake Matara \n🔹 Stay updated on community events\n🔹 Join a purpose-driven network \n\nTap Get Started below and begin your journey with Matara today! 🔥👇`,
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            telegraf_1.Markup.button.webApp("Start now!", `${weburl}/start?username=${username}&referralCode=${referralCode}`),
                         ],
-                    },
-                });
-            }
-            console.log("web url");
+                        [
+                            telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
+                        ],
+                    ],
+                },
+            });
+            console.log(`Successfully registered and sent welcome message to ${username}`);
         }
-        catch (error) {
-            console.log("Error registering user:", error);
-            // ctx.reply("Internal server error");
+    }
+    catch (error) {
+        console.error("Error in start command:", error);
+        // Send a fallback message if registration fails
+        try {
+            await ctx.reply("Welcome to Matara! There was a temporary issue, but you can still proceed. Please try again in a moment.");
         }
-        console.log("started");
+        catch (replyError) {
+            console.error("Error sending fallback message:", replyError);
+        }
     }
 });
-// Handle button clicks
-bot.action("start_now", (ctx) => ctx.reply('You clicked "Start now!"'));
-bot.action("join_community", (ctx) => ctx.reply('You clicked "Join community"'));
-bot.action("help", (ctx) => ctx.reply('You clicked "Help"'));
-// Launch the bot
-// Graceful shutdown
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+// Handle button clicks (though these won't be triggered with webApp buttons)
+bot.action("start_now", async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await ctx.reply('You clicked "Start now!"');
+    }
+    catch (error) {
+        console.error("Error handling start_now action:", error);
+    }
+});
+bot.action("join_community", async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await ctx.reply('You clicked "Join community"');
+    }
+    catch (error) {
+        console.error("Error handling join_community action:", error);
+    }
+});
+bot.action("help", async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        await ctx.reply('You clicked "Help"');
+    }
+    catch (error) {
+        console.error("Error handling help action:", error);
+    }
+});
+// Help command
+bot.help((ctx) => {
+    ctx.reply("Need help? Contact our support team or visit our community channel.");
+});
+// Handle any text message (optional)
+bot.on("text", (ctx) => {
+    console.log(`Received message from ${ctx.from?.username}: ${ctx.message.text}`);
+    // You can add custom text handling here if needed
+});
+// Don't call bot.launch() or setup signal handlers here
+// That will be handled in index.ts
 exports.default = bot;
 //# sourceMappingURL=index.js.map
