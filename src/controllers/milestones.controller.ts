@@ -9,129 +9,101 @@ export const createMilestone = async (req: Request, res: Response) => {
     const { count, points } = req.body;
 
     if (!count || !points) {
-      res.status(400).json({
-        status: false,
+      return res.status(400).json({
         message: "Count and Points are required.",
       });
-    } else {
-      const milestone = new Milestone({ count, points });
-
-      await milestone.save();
-      res.status(201).json({
-        message: "Milestone created successfully",
-        status: true,
-      });
     }
+
+    const milestone = new Milestone({ count, points });
+    await milestone.save();
+
+    return res.status(201).json({
+      message: "Milestone created successfully",
+    });
   } catch (error) {
-    res.status(500).json({ error: error, status: false });
+    console.error("Error creating milestone:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
-
-
 
 export const getUserMileStones = async (req: Request, res: Response) => {
   try {
     const { username } = req.params;
 
-    // Fetch the user and populate completed milestones
     const user = await User.findOne({ username })
-      .populate("milestonesCompleted")
+      .select("milestonesCompleted")
       .lean();
 
-     
-
     if (!user) {
-      return res.status(404).json({ status: false, message: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    // Extract completed milestones
-    const completedMilestones = user.milestonesCompleted || [];
-    const completedMilestoneIds = completedMilestones.map(
-      (milestone: any) => milestone._id
+    const completedMilestoneIds = new Set(
+      user.milestonesCompleted.map((id) => id.toString())
     );
-
-
-    // // Fetch all milestones
     const allMilestones = await Milestone.find().lean();
 
-    if (!allMilestones.length) {
-      return res.status(404).json({ status: false, message: "No milestones found" });
-    }
-
-    // Map through all milestones and determine if each is claimed
-    const milestonesWithStatus = allMilestones.map((milestone: any) => ({
+    const milestonesWithStatus = allMilestones.map((milestone) => ({
       ...milestone,
-      claimed: completedMilestoneIds.toString().includes(milestone._id),
+      claimed: completedMilestoneIds.has(milestone._id.toString()),
     }));
 
-
     return res.status(200).json({
-      status: true,
       milestones: milestonesWithStatus,
       message: "User milestones fetched successfully",
     });
   } catch (error) {
     console.error("Error fetching user milestones:", error);
-    return res.status(500).json({ status: false, message: "Internal server error", error: error.message });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-
 export const completeMilestone = async (req: Request, res: Response) => {
+  const { username, milestoneId } = req.body;
+
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { username, milestoneId } = req.body;
-
-    // Validate request body
-    if (!username || !milestoneId) {
-      return res.status(400).json({ status: false, message: "Invalid data provided" });
-    }
-
-    // Fetch the user
     const user = await User.findOne({ username }).session(session);
-    if (!user) {
-      return res.status(404).json({ status: false, message: "User not found" });
+    const milestone = await Milestone.findById(milestoneId).session(session);
+
+    if (!user || !milestone) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "User or Milestone not found" });
     }
 
-    // Fetch the user's points
+    if (user.milestonesCompleted.includes(milestone._id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: "Milestone already completed" });
+    }
+
     const points = await Point.findOne({ userId: user._id }).session(session);
     if (!points) {
-      return res.status(404).json({ status: false, message: "Points record not found" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Points not found" });
     }
 
-    // Fetch the milestone
-    const milestone = await Milestone.findById(milestoneId).session(session);
-    if (!milestone) {
-      return res.status(404).json({ status: false, message: "Milestone not found" });
-    }
-
-    // Check if the milestone has already been completed
-    if (user.milestonesCompleted.includes(milestone._id)) {
-      return res.status(400).json({ status: false, message: "Milestone already completed" });
-    }
-
-    // Update milestones and points
     user.milestonesCompleted.push(milestone._id);
-    const updatedPoints = points.points + milestone.points;
+    points.points += milestone.points;
 
-    await Point.findByIdAndUpdate(points._id, { points: updatedPoints }, { session });
     await user.save({ session });
+    await points.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
     return res.status(200).json({
-      status: true,
       message: "Milestone completed successfully",
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    return res.status(500).json({ status: false, message: "Internal server error", error: error.message });
+    console.error("Error completing milestone:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 

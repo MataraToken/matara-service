@@ -8,22 +8,15 @@ export const addPoints = async (message: PointsTypes) => {
 
   try {
     const user = await User.findOne({ username });
-    const userPoints = await Point.findOne({ userId: user._id });
-    console.log({ points, username });
-    if (userPoints) {
-      const currentPoints = userPoints.points;
-      const pointsToAdd = Number(points) - Number(currentPoints);
-      userPoints.points += pointsToAdd;
-      await userPoints.save();
-    } else {
-      const userId = user._id;
-      console.log(userId);
-      const newPoints = new Point({ points, userId });
-      await newPoints.save();
+    if (!user) {
+      console.error("User not found");
+      return;
     }
+
+    await Point.updateOne({ userId: user._id }, { $inc: { points: points } }, { upsert: true });
     console.log("Points updated successfully");
   } catch (error) {
-    console.log(error);
+    console.error("Error adding points:", error);
   }
 };
 
@@ -32,11 +25,13 @@ export const saveTimeStamps = async (message) => {
 
   try {
     const user = await User.findOne({ username });
-    const points = await Point.findOne({ userId: user._id });
-    points.energyStamp = timestamp;
-    await points.save();
+    if (!user) {
+      console.error("User not found");
+      return;
+    }
+    await Point.updateOne({ userId: user._id }, { energyStamp: timestamp });
   } catch (error) {
-    console.log(error);
+    console.error("Error saving timestamp:", error);
   }
 };
 
@@ -46,17 +41,16 @@ export const getUserPoint = async (req: Request, res: Response) => {
   try {
     const user = await User.findOne({ username });
     if (!user) {
-      return res.status(400).json({ status: false, error: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
     const points = await Point.findOne({ userId: user._id });
-    res.json({
-      status: true,
+    return res.status(200).json({
       data: points,
       message: "Points fetched successfully",
     });
   } catch (error) {
-    res.status(500).json({
-      status: false,
+    console.error("Error fetching user points:", error);
+    return res.status(500).json({
       message: "An error occurred while fetching points",
     });
   }
@@ -64,27 +58,24 @@ export const getUserPoint = async (req: Request, res: Response) => {
 
 export const getLeaderBoard = async (req: Request, res: Response) => {
   try {
-    // Get the top 50 users with the highest points
     const leaderboard = await Point.find()
-      .sort({ points: -1 }) // Sort by points in descending order
-      .limit(50) // Limit to top 50
+      .sort({ points: -1 })
+      .limit(50)
       .populate("userId", "username profilePicture level")
       .lean();
-    // Populate user details (replace 'name email' with actual fields from User model)
+
     const result = leaderboard.map((entry) => ({
-      user: entry.userId, // This will contain the populated user details
-      points: entry.points, // The user's points
+      user: entry.userId,
+      points: entry.points,
     }));
 
-    res.json({
-      status: true,
+    return res.status(200).json({
       data: result,
       message: "Leaderboard fetched successfully",
     });
   } catch (error) {
     console.error("Error fetching leaderboard:", error);
-    res.status(500).json({
-      status: false,
+    return res.status(500).json({
       message: "An error occurred while fetching the leaderboard",
     });
   }

@@ -1,17 +1,20 @@
 import { Request, Response } from "express";
 import Mining from "../model/mining.model";
 import User from "../model/user.model";
-import Point from "model/points.model";
+import Point from "../model/points.model";
+import mongoose from "mongoose";
 
-// Points rewarded after 24hrs
 const REWARD_POINTS = 50;
+const MINING_DURATION_HOURS = 24;
 
 export const startMining = async (req: Request, res: Response) => {
   const { username } = req.body;
 
   try {
     const user = await User.findOne({ username });
-    if (!user) return res.status(400).json({ status: false, error: "User not found" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     let mining = await Mining.findOne({ user: user._id });
     if (!mining) {
@@ -19,30 +22,39 @@ export const startMining = async (req: Request, res: Response) => {
     }
 
     if (mining.isMining) {
-      return res.status(400).json({ status: false, message: "Already mining" });
+      return res.status(400).json({ message: "Already mining" });
     }
 
     mining.miningStartedAt = new Date();
     mining.isMining = true;
     await mining.save();
 
-    return res.status(200).json({ status: true, data: {}, message: "Mining started" });
+    return res.status(200).json({ message: "Mining started" });
   } catch (err) {
     console.error("Start mining error:", err);
-    return res.status(500).json({ status: false, error: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
 export const claimMining = async (req: Request, res: Response) => {
   const { username } = req.body;
 
-  try {
-    const user = await User.findOne({ username });
-    if (!user) return res.status(400).json({ status: false, error: "User not found" });
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-    const mining = await Mining.findOne({ user: user._id });
+  try {
+    const user = await User.findOne({ username }).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const mining = await Mining.findOne({ user: user._id }).session(session);
     if (!mining || !mining.isMining) {
-      return res.status(400).json({ status: false, message: "Mining not started" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: "Mining not started" });
     }
 
     const now = new Date();
@@ -50,32 +62,36 @@ export const claimMining = async (req: Request, res: Response) => {
     const diffInMs = now.getTime() - started.getTime();
     const diffInHours = diffInMs / (1000 * 60 * 60);
 
-    if (diffInHours < 24) {
-      const hoursLeft = (24 - diffInHours).toFixed(2);
-      return res.status(400).json({ status: false, message: `${hoursLeft} hours left to claim` });
+    if (diffInHours < MINING_DURATION_HOURS) {
+      const hoursLeft = (MINING_DURATION_HOURS - diffInHours).toFixed(2);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: `${hoursLeft} hours left to claim` });
     }
 
-    const points = await Point.findOne({userId: user.id});
+    const points = await Point.findOne({ userId: user._id }).session(session);
     if (!points) {
-      return res.status(404).json({ status: false, message: "Points record not found" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Points record not found" });
     }
-    // Add points to user's points record
+
     points.points += REWARD_POINTS;
-    await points.save();
+    await points.save({ session });
 
-    // Add points to user
-    // user.points = (user.points || 0) + REWARD_POINTS;
-    // await user.save();
-
-    // Reset mining state
     mining.isMining = false;
     mining.lastClaimedAt = now;
     mining.miningStartedAt = null;
-    await mining.save();
+    await mining.save({ session });
 
-    return res.status(200).json({ status: true, message: `You earned ${REWARD_POINTS} points!` });
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({ message: `You earned ${REWARD_POINTS} points!` });
   } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
     console.error("Claim mining error:", err);
-    return res.status(500).json({ status: false, error: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
