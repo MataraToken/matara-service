@@ -105,7 +105,7 @@ bot.start(async (ctx) => {
               [
                 Markup.button.webApp(
                   "Start now!",
-                  `${weburl}/start?username=${username}&referralCode=${referralCode}`
+                  `${weburl}`
                 ),
               ],
               [
