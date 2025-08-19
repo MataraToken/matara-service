@@ -77,7 +77,7 @@ bot.start(async (ctx) => {
                 reply_markup: {
                     inline_keyboard: [
                         [
-                            telegraf_1.Markup.button.webApp("Start now!", `${weburl}/start?username=${username}&referralCode=${referralCode}`),
+                            telegraf_1.Markup.button.webApp("Start now!", `${weburl}`),
                         ],
                         [
                             telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
