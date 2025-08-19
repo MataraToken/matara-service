@@ -140,6 +140,30 @@ export const saveOnboarding = async (req: Request, res: Response) => {
   }
 };
 
+export const userRanking = async (req: Request, res: Response) => {
+  try {
+    const users = await User.find({}, 'username').lean();
+    const userIds = users.map(user => user._id);
+    
+    const points = await Point.find({ userId: { $in: userIds } }, 'userId points').lean();
+    const pointsMap = new Map(points.map(p => [p.userId.toString(), p.points]));
+    
+    const userRankings = users.map(user => ({
+      username: user.username,
+      totalEarnings: pointsMap.get(user._id.toString()) || 0
+    }))
+    .sort((a, b) => b.totalEarnings - a.totalEarnings);
+
+    return res.status(200).json({
+      data: userRankings,
+      message: "User rankings fetched successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching user rankings:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 
 
 

@@ -9,5 +9,6 @@ router.get("/referrals", user_controller_1.getReferredUsers);
 router.get("/leaderboard", point_controller_1.getLeaderBoard);
 router.post("/onboard", user_controller_1.saveOnboarding);
 router.get("/points", point_controller_1.getUserPoint);
+router.get("/ranking", user_controller_1.userRanking);
 exports.default = router;
 //# sourceMappingURL=user.route.js.map

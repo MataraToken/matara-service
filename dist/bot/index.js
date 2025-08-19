@@ -61,7 +61,7 @@ bot.start(async (ctx) => {
         }
         const profilePicture = await getProfilePicture(ctx.from.id);
         // Use your actual web app URL here instead of ngrok
-        const weburl = process.env.WEB_APP_URL || "https://your-webapp-domain.com";
+        const weburl = process.env.WEB_APP_URL || "https://matara-tma.vercel.app/";
         const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
         console.log(`Registering user: ${username}`);
         const res = await axios_1.default.post(`${serverUrl}/api/user/register`, {

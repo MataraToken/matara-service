@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
+exports.userRanking = exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
 const utils_1 = require("../utils");
 const user_model_1 = __importDefault(require("../model/user.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
@@ -123,4 +123,26 @@ const saveOnboarding = async (req, res) => {
     }
 };
 exports.saveOnboarding = saveOnboarding;
+const userRanking = async (req, res) => {
+    try {
+        const users = await user_model_1.default.find({}, 'username').lean();
+        const userIds = users.map(user => user._id);
+        const points = await points_model_1.default.find({ userId: { $in: userIds } }, 'userId points').lean();
+        const pointsMap = new Map(points.map(p => [p.userId.toString(), p.points]));
+        const userRankings = users.map(user => ({
+            username: user.username,
+            totalEarnings: pointsMap.get(user._id.toString()) || 0
+        }))
+            .sort((a, b) => b.totalEarnings - a.totalEarnings);
+        return res.status(200).json({
+            data: userRankings,
+            message: "User rankings fetched successfully"
+        });
+    }
+    catch (error) {
+        console.error("Error fetching user rankings:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+exports.userRanking = userRanking;
 //# sourceMappingURL=user.controller.js.map
