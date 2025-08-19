@@ -10,6 +10,7 @@ const miningSchema = new mongoose.Schema({
   miningStartedAt: { type: Date, default: null },
   lastClaimedAt: { type: Date, default: null },
   isMining: { type: Boolean, default: false },
+  sessionPoints: {type: Number, default: 0}
 });
 
 const Mining = mongoose.model("Mining", miningSchema);

@@ -14,6 +14,7 @@ const miningSchema = new mongoose_1.default.Schema({
     miningStartedAt: { type: Date, default: null },
     lastClaimedAt: { type: Date, default: null },
     isMining: { type: Boolean, default: false },
+    sessionPoints: { type: Number, default: 0 }
 });
 const Mining = mongoose_1.default.model("Mining", miningSchema);
 exports.default = Mining;

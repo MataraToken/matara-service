@@ -31,8 +31,8 @@ export const registerUser = async (req: Request, res: Response) => {
       firstName,
     });
 
-    const initialPoints = 30000;
-    const additionalPoints = 1000;
+    const initialPoints = 20;
+    const additionalPoints = 10;
     const newPoints = new Point({
       userId: newUser._id,
       points: initialPoints + additionalPoints,

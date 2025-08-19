@@ -7,9 +7,10 @@ exports.collectBonus = exports.checkBonusStatus = void 0;
 const user_model_1 = __importDefault(require("../model/user.model"));
 const bonus_model_1 = __importDefault(require("../model/bonus.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
-const MILLISECONDS_IN_A_DAY = 24 * 60 * 60 * 1000; // One day in milliseconds
+const mongoose_1 = __importDefault(require("mongoose"));
+const MILLISECONDS_IN_A_DAY = 24 * 60 * 60 * 1000;
 const checkBonusStatus = async (req, res) => {
-    const { username } = req.params; // Assuming you pass the username from the frontend
+    const { username } = req.params;
     try {
         const user = await user_model_1.default.findOne({ username });
         if (!user) {
@@ -18,115 +19,91 @@ const checkBonusStatus = async (req, res) => {
         const loginBonus = await bonus_model_1.default.findOne({ userId: user._id });
         if (!loginBonus) {
             return res.status(200).json({
-                status: true,
-                message: "User has not collected any bonuses yet. Eligible for today's bonus.",
                 isEligible: true,
                 loginStreak: 0,
-                bonusCollected: false,
             });
         }
         const currentTime = new Date();
         const lastLoginTime = new Date(loginBonus.lastLogin);
         const timeDifference = currentTime.getTime() - lastLoginTime.getTime();
-        if (timeDifference >= 24 * 60 * 60 * 1000) {
-            return res.status(200).json({
-                status: true,
-                message: "User is eligible to collect today's bonus.",
-                isEligible: true,
-                loginStreak: loginBonus.loginStreak,
-                bonusCollected: false,
-            });
-        }
-        else {
-            return res.status(200).json({
-                status: false,
-                message: "User has already collected today's bonus.",
-                isEligible: false,
-                loginStreak: loginBonus.loginStreak,
-                bonusCollected: true,
-            });
-        }
+        const isEligible = timeDifference >= MILLISECONDS_IN_A_DAY;
+        return res.status(200).json({
+            isEligible,
+            loginStreak: loginBonus.loginStreak,
+        });
     }
     catch (error) {
-        return res.status(500).json({ message: "Internal server error", error });
+        console.error("Error checking bonus status:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.checkBonusStatus = checkBonusStatus;
 const collectBonus = async (req, res) => {
-    const { username } = req.body; // Assuming username is passed from the frontend
+    const { username } = req.body;
+    const session = await mongoose_1.default.startSession();
+    session.startTransaction();
     try {
-        const user = await user_model_1.default.findOne({ username });
+        const user = await user_model_1.default.findOne({ username }).session(session);
         if (!user) {
+            await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ message: "User not found" });
         }
-        const points = await points_model_1.default.findOne({ userId: user._id });
-        const loginBonus = await bonus_model_1.default.findOne({ userId: user._id });
-        const currentTime = new Date();
-        // If the user doesn't have a bonus record, create one and collect the first bonus
-        if (!loginBonus) {
-            const newBonus = new bonus_model_1.default({
-                userId: user._id,
-                lastLogin: currentTime,
-                loginStreak: 1,
-                bonusCollected: true,
-            });
-            const bonusPoints = calculateBonus(1);
-            points.points += bonusPoints;
-            await points.save();
-            await newBonus.save();
-            return res.status(200).json({
-                status: true,
-                message: "First daily bonus collected!",
-                loginStreak: 1,
-                bonusPoints,
-                totalPoints: points.points,
-            });
+        const points = await points_model_1.default.findOne({ userId: user._id }).session(session);
+        if (!points) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "Points not found" });
         }
-        const lastLoginTime = new Date(loginBonus.lastLogin);
-        const timeDifference = currentTime.getTime() - lastLoginTime.getTime();
-        // Check if the user is eligible for a new bonus (24 hours must have passed)
-        if (timeDifference >= MILLISECONDS_IN_A_DAY) {
-            // Reset streak if the user missed more than 48 hours
+        let loginBonus = await bonus_model_1.default.findOne({ userId: user._id }).session(session);
+        const currentTime = new Date();
+        if (loginBonus) {
+            const lastLoginTime = new Date(loginBonus.lastLogin);
+            const timeDifference = currentTime.getTime() - lastLoginTime.getTime();
+            if (timeDifference < MILLISECONDS_IN_A_DAY) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Bonus already collected for today." });
+            }
             if (timeDifference >= MILLISECONDS_IN_A_DAY * 2) {
                 loginBonus.loginStreak = 0;
             }
-            // Award the bonus
             loginBonus.loginStreak += 1;
-            loginBonus.bonusCollected = true;
             loginBonus.lastLogin = currentTime;
-            const bonusPoints = calculateBonus(loginBonus.loginStreak);
-            points.points += bonusPoints;
-            await points.save();
-            await loginBonus.save();
-            return res.status(200).json({
-                status: true,
-                message: "Daily bonus collected!",
-                loginStreak: loginBonus.loginStreak,
-                bonusPoints,
-                totalPoints: points.points,
-            });
         }
         else {
-            // If the user already collected today's bonus
-            return res.status(400).json({
-                status: false,
-                message: "Bonus already collected for today.",
-                loginStreak: loginBonus.loginStreak,
+            loginBonus = new bonus_model_1.default({
+                userId: user._id,
+                lastLogin: currentTime,
+                loginStreak: 1,
             });
         }
+        const bonusPoints = calculateBonus(loginBonus.loginStreak);
+        points.points += bonusPoints;
+        await loginBonus.save({ session });
+        await points.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+        return res.status(200).json({
+            message: "Bonus collected successfully!",
+            loginStreak: loginBonus.loginStreak,
+            bonusPoints,
+            totalPoints: points.points,
+        });
     }
     catch (error) {
-        console.log(error);
-        return res.status(500).json({ message: "Internal server error", error });
+        await session.abortTransaction();
+        session.endSession();
+        console.error("Error collecting bonus:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.collectBonus = collectBonus;
-// Example function to calculate bonus based on streak
 const calculateBonus = (streak) => {
     if (streak === 0)
-        return 1000; // Return 1000 if streak is 0
+        return 1000;
     const baseBonus = 1000;
-    const additionalBonus = 1000 * (streak - 1); // Add 1000 for each additional day
+    const additionalBonus = 1000 * (streak - 1);
     return baseBonus + additionalBonus;
 };
 //# sourceMappingURL=bonus.controller.js.map

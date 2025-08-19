@@ -7,6 +7,8 @@ exports.completeTask = exports.updateTask = exports.getTask = exports.getUserTas
 const task_model_1 = __importDefault(require("../model/task.model"));
 const user_model_1 = __importDefault(require("../model/user.model"));
 const cloud_1 = __importDefault(require("../cloud"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const points_model_1 = __importDefault(require("../model/points.model"));
 const createTask = async (req, res) => {
     try {
         const { file } = req;
@@ -16,7 +18,6 @@ const createTask = async (req, res) => {
         if (taskExists) {
             return res.status(400).json({
                 message: "Task already exists",
-                status: false,
             });
         }
         const task = new task_model_1.default({ title, slug, description, points, link });
@@ -27,56 +28,35 @@ const createTask = async (req, res) => {
         await task.save();
         res.status(201).json({
             message: "Task created successfully",
-            status: true,
         });
     }
     catch (error) {
-        res.status(500).json({ error: error, status: false });
+        console.error("Error creating task:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.createTask = createTask;
 const getUserTasks = async (req, res) => {
     const { username } = req.params;
     try {
-        const user = await user_model_1.default.findOne({ username })
-            .populate("tasksCompleted")
-            .lean();
+        const user = await user_model_1.default.findOne({ username }).select("tasksCompleted").lean();
         if (!user) {
-            return res.status(404).json({ status: false, message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
-        const completedTasks = user.tasksCompleted;
-        const completedTaskIds = completedTasks.map((task) => task._id);
-        // Fetch undone tasks
-        let undoneTasks = await task_model_1.default.find({ _id: { $nin: completedTaskIds } })
-            .select("-createdAt -updatedAt -__v")
-            .lean();
-        // Check if the number of undone tasks is less than 5
-        if (undoneTasks.length < 5) {
-            // Calculate how many completed tasks are needed
-            const remainingTasksNeeded = 5 - undoneTasks.length;
-            // Fetch the necessary completed tasks
-            const additionalTasks = completedTasks
-                .slice(0, remainingTasksNeeded)
-                .map((task) => ({
-                ...task,
-                completed: true,
-            }));
-            // Add the necessary completed tasks to the undone tasks
-            undoneTasks = undoneTasks.concat(additionalTasks);
-        }
-        // Include a "completed: false" field for undone tasks
-        const tasksWithCompletionStatus = undoneTasks.map((task) => ({
+        const completedTaskIds = new Set(user.tasksCompleted.map(id => id.toString()));
+        const allTasks = await task_model_1.default.find().lean();
+        const tasksWithCompletionStatus = allTasks.map((task) => ({
             ...task,
-            completed: completedTaskIds.includes(task._id) ? true : false,
+            completed: completedTaskIds.has(task._id.toString()),
         }));
         res.status(200).json({
             data: tasksWithCompletionStatus,
-            status: true,
             message: "Tasks fetched successfully",
         });
     }
     catch (error) {
-        res.status(500).json({ error: error.message, status: false });
+        console.error("Error fetching user tasks:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.getUserTasks = getUserTasks;
@@ -85,14 +65,13 @@ const getTask = async (req, res) => {
         const { slug } = req.params;
         const task = await task_model_1.default.findOne({ slug });
         if (!task) {
-            return res.status(404).json({ message: "Task not found", status: false });
+            return res.status(404).json({ message: "Task not found" });
         }
-        res
-            .status(200)
-            .json({ task, status: true, message: "Task fetched successfully" });
+        res.status(200).json({ task, message: "Task fetched successfully" });
     }
     catch (error) {
-        res.status(500).json({ error: error, status: false });
+        console.error("Error fetching task:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.getTask = getTask;
@@ -103,67 +82,73 @@ const updateTask = async (req, res) => {
         const { file } = req;
         const task = await task_model_1.default.findOne({ slug });
         if (!task) {
-            return res.status(404).json({ message: "Task not found", status: false });
-        }
-        const public_id = task.icon?.public_id;
-        if (public_id && file) {
-            const { result } = await cloud_1.default.uploader.destroy(public_id);
-            if (result !== "ok")
-                return res.status(404).json({ error: "Could not remove icon !" });
+            return res.status(404).json({ message: "Task not found" });
         }
         if (file) {
+            if (task.icon?.public_id) {
+                await cloud_1.default.uploader.destroy(task.icon.public_id);
+            }
             const { secure_url: url, public_id } = await cloud_1.default.uploader.upload(file.path);
             task.icon = { url, public_id };
         }
-        if (title !== undefined)
-            task.title = title;
-        if (description !== undefined)
-            task.description = description;
-        if (points !== undefined)
-            task.points = points;
-        if (link !== undefined)
-            task.link = link;
+        task.title = title ?? task.title;
+        task.description = description ?? task.description;
+        task.points = points ?? task.points;
+        task.link = link ?? task.link;
         const updated = await task.save();
         res.status(200).json({
-            task: {
-                id: updated._id,
-                title: updated.title,
-                slug: updated.slug,
-                description: updated.description,
-                points: updated.points,
-                link: updated.link,
-                icon: updated.icon?.url,
-            },
-            status: true,
+            task: updated,
             message: "Task updated successfully",
         });
     }
     catch (error) {
-        res.status(500).json({ error: error, status: false });
+        console.error("Error updating task:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.updateTask = updateTask;
 const completeTask = async (req, res) => {
+    const { slug } = req.params;
+    const { username } = req.body;
+    const session = await mongoose_1.default.startSession();
+    session.startTransaction();
     try {
-        const { slug } = req.params;
-        const { username } = req.body;
-        console.log(username);
-        const task = await task_model_1.default.findOne({ slug });
+        const task = await task_model_1.default.findOne({ slug }).session(session);
         if (!task) {
-            return res.status(404).json({ message: "Task not found", status: false });
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "Task not found" });
         }
-        const user = await user_model_1.default.findOne({ username: username });
+        const user = await user_model_1.default.findOne({ username }).session(session);
         if (!user) {
-            return res.status(404).json({ message: "User not found", status: false });
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "User not found" });
+        }
+        if (user.tasksCompleted.includes(task._id)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: "Task already completed" });
+        }
+        const points = await points_model_1.default.findOne({ userId: user._id }).session(session);
+        if (!points) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "Points not found" });
         }
         user.tasksCompleted.push(task._id);
-        await user.save();
-        res
-            .status(200)
-            .json({ message: "Task completed successfully", status: true });
+        points.points += task.points;
+        await user.save({ session });
+        await points.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+        res.status(200).json({ message: "Task completed successfully" });
     }
     catch (error) {
-        res.status(500).json({ error: error, status: false });
+        await session.abortTransaction();
+        session.endSession();
+        console.error("Error completing task:", error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.completeTask = completeTask;

@@ -14,6 +14,7 @@ import pingRouter from "./routes/ping.route";
 import milestoneRouter from "./routes/milestones.route";
 import boostRouter from "./routes/boosts.route";
 import bonusRouter from "./routes/bonus.route";
+import mineRouter from "./routes/mine.route";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -51,6 +52,7 @@ app.use("/api/ping", pingRouter);
 app.use("/api/milestone", milestoneRouter);
 app.use("/api/boost", boostRouter);
 app.use("/api/bonus", bonusRouter);
+app.use("/api/mine", mineRouter);
 
 let botRunning = false;
 let isSettingUpBot = false;

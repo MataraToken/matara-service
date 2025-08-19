@@ -18,6 +18,7 @@ const ping_route_1 = __importDefault(require("./routes/ping.route"));
 const milestones_route_1 = __importDefault(require("./routes/milestones.route"));
 const boosts_route_1 = __importDefault(require("./routes/boosts.route"));
 const bonus_route_1 = __importDefault(require("./routes/bonus.route"));
+const mine_route_1 = __importDefault(require("./routes/mine.route"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -46,6 +47,7 @@ app.use("/api/ping", ping_route_1.default);
 app.use("/api/milestone", milestones_route_1.default);
 app.use("/api/boost", boosts_route_1.default);
 app.use("/api/bonus", bonus_route_1.default);
+app.use("/api/mine", mine_route_1.default);
 let botRunning = false;
 let isSettingUpBot = false;
 const setupBot = async () => {

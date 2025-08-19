@@ -12,104 +12,86 @@ const createMilestone = async (req, res) => {
     try {
         const { count, points } = req.body;
         if (!count || !points) {
-            res.status(400).json({
-                status: false,
+            return res.status(400).json({
                 message: "Count and Points are required.",
             });
         }
-        else {
-            const milestone = new milestones_model_1.default({ count, points });
-            await milestone.save();
-            res.status(201).json({
-                message: "Milestone created successfully",
-                status: true,
-            });
-        }
+        const milestone = new milestones_model_1.default({ count, points });
+        await milestone.save();
+        return res.status(201).json({
+            message: "Milestone created successfully",
+        });
     }
     catch (error) {
-        res.status(500).json({ error: error, status: false });
+        console.error("Error creating milestone:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.createMilestone = createMilestone;
 const getUserMileStones = async (req, res) => {
     try {
         const { username } = req.params;
-        // Fetch the user and populate completed milestones
         const user = await user_model_1.default.findOne({ username })
-            .populate("milestonesCompleted")
+            .select("milestonesCompleted")
             .lean();
         if (!user) {
-            return res.status(404).json({ status: false, message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
-        // Extract completed milestones
-        const completedMilestones = user.milestonesCompleted || [];
-        const completedMilestoneIds = completedMilestones.map((milestone) => milestone._id);
-        // // Fetch all milestones
+        const completedMilestoneIds = new Set(user.milestonesCompleted.map((id) => id.toString()));
         const allMilestones = await milestones_model_1.default.find().lean();
-        if (!allMilestones.length) {
-            return res.status(404).json({ status: false, message: "No milestones found" });
-        }
-        // Map through all milestones and determine if each is claimed
         const milestonesWithStatus = allMilestones.map((milestone) => ({
             ...milestone,
-            claimed: completedMilestoneIds.toString().includes(milestone._id),
+            claimed: completedMilestoneIds.has(milestone._id.toString()),
         }));
         return res.status(200).json({
-            status: true,
             milestones: milestonesWithStatus,
             message: "User milestones fetched successfully",
         });
     }
     catch (error) {
         console.error("Error fetching user milestones:", error);
-        return res.status(500).json({ status: false, message: "Internal server error", error: error.message });
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.getUserMileStones = getUserMileStones;
 const completeMilestone = async (req, res) => {
+    const { username, milestoneId } = req.body;
     const session = await mongoose_1.default.startSession();
     session.startTransaction();
     try {
-        const { username, milestoneId } = req.body;
-        // Validate request body
-        if (!username || !milestoneId) {
-            return res.status(400).json({ status: false, message: "Invalid data provided" });
-        }
-        // Fetch the user
         const user = await user_model_1.default.findOne({ username }).session(session);
-        if (!user) {
-            return res.status(404).json({ status: false, message: "User not found" });
+        const milestone = await milestones_model_1.default.findById(milestoneId).session(session);
+        if (!user || !milestone) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "User or Milestone not found" });
         }
-        // Fetch the user's points
+        if (user.milestonesCompleted.includes(milestone._id)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: "Milestone already completed" });
+        }
         const points = await points_model_1.default.findOne({ userId: user._id }).session(session);
         if (!points) {
-            return res.status(404).json({ status: false, message: "Points record not found" });
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: "Points not found" });
         }
-        // Fetch the milestone
-        const milestone = await milestones_model_1.default.findById(milestoneId).session(session);
-        if (!milestone) {
-            return res.status(404).json({ status: false, message: "Milestone not found" });
-        }
-        // Check if the milestone has already been completed
-        if (user.milestonesCompleted.includes(milestone._id)) {
-            return res.status(400).json({ status: false, message: "Milestone already completed" });
-        }
-        // Update milestones and points
         user.milestonesCompleted.push(milestone._id);
-        const updatedPoints = points.points + milestone.points;
-        await points_model_1.default.findByIdAndUpdate(points._id, { points: updatedPoints }, { session });
+        points.points += milestone.points;
         await user.save({ session });
+        await points.save({ session });
         await session.commitTransaction();
         session.endSession();
         return res.status(200).json({
-            status: true,
             message: "Milestone completed successfully",
         });
     }
     catch (error) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(500).json({ status: false, message: "Internal server error", error: error.message });
+        console.error("Error completing milestone:", error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
 exports.completeMilestone = completeMilestone;
