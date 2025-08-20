@@ -27,7 +27,10 @@ const startMining = async (req, res) => {
         mining.miningStartedAt = new Date();
         mining.isMining = true;
         await mining.save();
-        return res.status(200).json({ message: "Mining started" });
+        return res.status(200).json({
+            data: mining,
+            message: "Mining started",
+        });
     }
     catch (err) {
         console.error("Start mining error:", err);
@@ -36,7 +39,7 @@ const startMining = async (req, res) => {
 };
 exports.startMining = startMining;
 const claimMining = async (req, res) => {
-    const { username } = req.query;
+    const { username, mineCount } = req.query;
     const session = await mongoose_1.default.startSession();
     session.startTransaction();
     try {
@@ -60,7 +63,9 @@ const claimMining = async (req, res) => {
             const hoursLeft = (MINING_DURATION_HOURS - diffInHours).toFixed(2);
             await session.abortTransaction();
             session.endSession();
-            return res.status(400).json({ message: `${hoursLeft} hours left to claim` });
+            return res
+                .status(400)
+                .json({ message: `${hoursLeft} hours left to claim` });
         }
         const points = await points_model_1.default.findOne({ userId: user._id }).session(session);
         if (!points) {
@@ -68,7 +73,7 @@ const claimMining = async (req, res) => {
             session.endSession();
             return res.status(404).json({ message: "Points record not found" });
         }
-        points.points += REWARD_POINTS;
+        points.points += Number(mineCount);
         await points.save({ session });
         mining.isMining = false;
         mining.lastClaimedAt = now;
@@ -76,7 +81,9 @@ const claimMining = async (req, res) => {
         await mining.save({ session });
         await session.commitTransaction();
         session.endSession();
-        return res.status(200).json({ message: `You earned ${REWARD_POINTS} points!` });
+        return res
+            .status(200)
+            .json({ message: `You earned ${mineCount} points!` });
     }
     catch (err) {
         await session.abortTransaction();
@@ -106,7 +113,7 @@ const miningState = async (req, res) => {
                 earnedPoints: 0,
                 totalPoints: points.points,
                 canClaim: false,
-                lastClaimed: null
+                lastClaimed: null,
             });
         }
         if (!mining.isMining) {
@@ -117,7 +124,7 @@ const miningState = async (req, res) => {
                 earnedPoints: 0,
                 totalPoints: points.points,
                 canClaim: false,
-                lastClaimed: mining.lastClaimedAt
+                lastClaimed: mining.lastClaimedAt,
             });
         }
         const now = new Date();
@@ -127,7 +134,9 @@ const miningState = async (req, res) => {
         const progress = Math.min((diffInHours / MINING_DURATION_HOURS) * 100, 100);
         const timeLeft = Math.max(MINING_DURATION_HOURS - diffInHours, 0);
         const canClaim = diffInHours >= MINING_DURATION_HOURS;
-        const earnedPoints = canClaim ? REWARD_POINTS : Math.floor((diffInHours / MINING_DURATION_HOURS) * REWARD_POINTS);
+        const earnedPoints = canClaim
+            ? REWARD_POINTS
+            : Math.floor((diffInHours / MINING_DURATION_HOURS) * REWARD_POINTS);
         return res.status(200).json({
             isMining: true,
             timeLeft: parseFloat(timeLeft.toFixed(2)),
@@ -136,7 +145,7 @@ const miningState = async (req, res) => {
             totalPoints: points.points,
             canClaim,
             miningStartedAt: mining.miningStartedAt,
-            lastClaimed: mining.lastClaimedAt
+            lastClaimed: mining.lastClaimedAt,
         });
     }
     catch (err) {

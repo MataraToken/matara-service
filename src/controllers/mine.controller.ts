@@ -29,7 +29,10 @@ export const startMining = async (req: Request, res: Response) => {
     mining.isMining = true;
     await mining.save();
 
-    return res.status(200).json({ message: "Mining started" });
+    return res.status(200).json({
+      data: mining,
+      message: "Mining started",
+    });
   } catch (err) {
     console.error("Start mining error:", err);
     return res.status(500).json({ message: "Internal server error" });
@@ -37,7 +40,7 @@ export const startMining = async (req: Request, res: Response) => {
 };
 
 export const claimMining = async (req: Request, res: Response) => {
-  const { username } = req.query;
+  const { username, mineCount } = req.query;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -66,7 +69,9 @@ export const claimMining = async (req: Request, res: Response) => {
       const hoursLeft = (MINING_DURATION_HOURS - diffInHours).toFixed(2);
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ message: `${hoursLeft} hours left to claim` });
+      return res
+        .status(400)
+        .json({ message: `${hoursLeft} hours left to claim` });
     }
 
     const points = await Point.findOne({ userId: user._id }).session(session);
@@ -76,7 +81,7 @@ export const claimMining = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Points record not found" });
     }
 
-    points.points += REWARD_POINTS;
+    points.points += Number(mineCount);
     await points.save({ session });
 
     mining.isMining = false;
@@ -87,7 +92,9 @@ export const claimMining = async (req: Request, res: Response) => {
     await session.commitTransaction();
     session.endSession();
 
-    return res.status(200).json({ message: `You earned ${REWARD_POINTS} points!` });
+    return res
+      .status(200)
+      .json({ message: `You earned ${mineCount} points!` });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -120,7 +127,7 @@ export const miningState = async (req: Request, res: Response) => {
         earnedPoints: 0,
         totalPoints: points.points,
         canClaim: false,
-        lastClaimed: null
+        lastClaimed: null,
       });
     }
 
@@ -132,7 +139,7 @@ export const miningState = async (req: Request, res: Response) => {
         earnedPoints: 0,
         totalPoints: points.points,
         canClaim: false,
-        lastClaimed: mining.lastClaimedAt
+        lastClaimed: mining.lastClaimedAt,
       });
     }
 
@@ -140,11 +147,13 @@ export const miningState = async (req: Request, res: Response) => {
     const started = new Date(mining.miningStartedAt as Date);
     const diffInMs = now.getTime() - started.getTime();
     const diffInHours = diffInMs / (1000 * 60 * 60);
-    
+
     const progress = Math.min((diffInHours / MINING_DURATION_HOURS) * 100, 100);
     const timeLeft = Math.max(MINING_DURATION_HOURS - diffInHours, 0);
     const canClaim = diffInHours >= MINING_DURATION_HOURS;
-    const earnedPoints = canClaim ? REWARD_POINTS : Math.floor((diffInHours / MINING_DURATION_HOURS) * REWARD_POINTS);
+    const earnedPoints = canClaim
+      ? REWARD_POINTS
+      : Math.floor((diffInHours / MINING_DURATION_HOURS) * REWARD_POINTS);
 
     return res.status(200).json({
       isMining: true,
@@ -154,10 +163,10 @@ export const miningState = async (req: Request, res: Response) => {
       totalPoints: points.points,
       canClaim,
       miningStartedAt: mining.miningStartedAt,
-      lastClaimed: mining.lastClaimedAt
+      lastClaimed: mining.lastClaimedAt,
     });
   } catch (err) {
     console.error("Mining state error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-}
+};
