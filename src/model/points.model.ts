@@ -9,7 +9,7 @@ const pointsSchema = new mongoose.Schema(
     },
     points: {
       type: Number,
-      default: 30000,
+      default: 20,
     },
     energy: {
       type: Number,

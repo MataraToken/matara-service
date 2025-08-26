@@ -40,7 +40,7 @@ export const startMining = async (req: Request, res: Response) => {
 };
 
 export const claimMining = async (req: Request, res: Response) => {
-  const { username, mineCount } = req.query;
+  const { username, mineCount } = req.body;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -103,7 +103,7 @@ export const claimMining = async (req: Request, res: Response) => {
   }
 };
 
-export const miningState = async (req: Request, res: Response) => {
+export const miningState = async (req: Request, res: Response) => { 
   const { username } = req.query;
 
   try {
