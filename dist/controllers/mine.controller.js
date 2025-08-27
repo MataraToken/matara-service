@@ -39,7 +39,7 @@ const startMining = async (req, res) => {
 };
 exports.startMining = startMining;
 const claimMining = async (req, res) => {
-    const { username, mineCount } = req.query;
+    const { username, mineCount } = req.body;
     const session = await mongoose_1.default.startSession();
     session.startTransaction();
     try {

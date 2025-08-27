@@ -22,6 +22,7 @@ export const createTask = async (req: Request, res: Response) => {
     if (file) {
       const { secure_url: url, public_id } = await cloudinary.uploader.upload(
         file.path
+        
       );
       task.icon = { url, public_id };
     }
