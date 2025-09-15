@@ -6,7 +6,8 @@
         "outDir": "dist",
         "sourceMap": true,
         "resolveJsonModule": true,
-        "noImplicitAny": false
+        "noImplicitAny": false,
+        "skipLibCheck": true
     },
     "include": ["src/**/*"],
 }

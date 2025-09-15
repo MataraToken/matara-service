@@ -4,6 +4,7 @@ const router = require("express").Router();
 const point_controller_1 = require("../controllers/point.controller");
 const user_controller_1 = require("../controllers/user.controller");
 router.post("/register", user_controller_1.registerUser);
+router.get("/", user_controller_1.getUsers);
 router.get("/get-user", user_controller_1.getUser);
 router.get("/referrals", user_controller_1.getReferredUsers);
 router.get("/leaderboard", point_controller_1.getLeaderBoard);

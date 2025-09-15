@@ -1,21 +1,25 @@
 import { Request, Response, NextFunction } from "express";
-import User from "../model/user.model";
+import jwt from "jsonwebtoken";
 
 export const isAdmin = async (req: Request, res: Response, next: NextFunction) => {
-  const { username } = req.headers;
+  const authHeader = req.headers.authorization;
 
-  if (!username) {
-    return res.status(401).json({ message: "Unauthorized: Username not provided" });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized: No token provided" });
   }
 
+  const token = authHeader.split(" ")[1];
+
   try {
-    const user = await User.findOne({ username });
-    if (!user || !user.isAdmin) {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret") as { id: string; isAdmin: boolean };
+
+    if (!decoded.isAdmin) {
       return res.status(403).json({ message: "Forbidden: User is not an admin" });
     }
+
     next();
   } catch (error) {
     console.error("Error in isAdmin middleware:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(401).json({ message: "Unauthorized: Invalid token" });
   }
 };

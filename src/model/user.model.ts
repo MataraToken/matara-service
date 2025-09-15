@@ -45,6 +45,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    password: {
+      type: String,
+      select: false,
+    },
     autoTapEndTime: { type: Date, default: null },
     autoTapPaused: { type: Boolean, default: false },
     tasksCompleted: [

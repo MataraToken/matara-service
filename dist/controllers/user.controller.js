@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.userRanking = exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
+exports.getUsers = exports.userRanking = exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
 const utils_1 = require("../utils");
 const user_model_1 = __importDefault(require("../model/user.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
@@ -145,4 +145,18 @@ const userRanking = async (req, res) => {
     }
 };
 exports.userRanking = userRanking;
+const getUsers = async (req, res) => {
+    try {
+        const users = await user_model_1.default.find().lean();
+        res.status(200).json({
+            data: users,
+            message: "Users fetched successfully",
+        });
+    }
+    catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+exports.getUsers = getUsers;
 //# sourceMappingURL=user.controller.js.map

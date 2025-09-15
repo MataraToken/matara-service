@@ -3,39 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.completeTask = exports.updateTask = exports.getTask = exports.getUserTasks = exports.createTask = void 0;
+exports.completeTask = exports.updateTask = exports.getTask = exports.getUserTasks = void 0;
 const task_model_1 = __importDefault(require("../model/task.model"));
 const user_model_1 = __importDefault(require("../model/user.model"));
 const cloud_1 = __importDefault(require("../cloud"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const points_model_1 = __importDefault(require("../model/points.model"));
-const createTask = async (req, res) => {
-    try {
-        const { file } = req;
-        const { title, description, points, link } = req.body;
-        const slug = title.toLowerCase().split(" ").join("-");
-        const taskExists = await task_model_1.default.findOne({ slug });
-        if (taskExists) {
-            return res.status(400).json({
-                message: "Task already exists",
-            });
-        }
-        const task = new task_model_1.default({ title, slug, description, points, link });
-        if (file) {
-            const { secure_url: url, public_id } = await cloud_1.default.uploader.upload(file.path);
-            task.icon = { url, public_id };
-        }
-        await task.save();
-        res.status(201).json({
-            message: "Task created successfully",
-        });
-    }
-    catch (error) {
-        console.error("Error creating task:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
-};
-exports.createTask = createTask;
 const getUserTasks = async (req, res) => {
     const { username } = req.params;
     try {
