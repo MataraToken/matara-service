@@ -5,37 +5,6 @@ import cloudinary from "../cloud";
 import mongoose from "mongoose";
 import Point from "../model/points.model";
 
-export const createTask = async (req: Request, res: Response) => {
-  try {
-    const { file } = req;
-    const { title, description, points, link } = req.body;
-    const slug = title.toLowerCase().split(" ").join("-");
-
-    const taskExists = await Task.findOne({ slug });
-    if (taskExists) {
-      return res.status(400).json({
-        message: "Task already exists",
-      });
-    }
-    const task = new Task({ title, slug, description, points, link });
-
-    if (file) {
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path
-        
-      );
-      task.icon = { url, public_id };
-    }
-
-    await task.save();
-    res.status(201).json({
-      message: "Task created successfully",
-    });
-  } catch (error) {
-    console.error("Error creating task:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
 
 export const getUserTasks = async (req: Request, res: Response) => {
   const { username } = req.params;
@@ -167,3 +136,4 @@ export const completeTask = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
