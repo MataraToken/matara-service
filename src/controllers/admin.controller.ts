@@ -84,6 +84,7 @@ export const createTask = async (req: Request, res: Response) => {
   try {
     const { file } = req;
     const { title, description, points, link } = req.body;
+    console.log(req.body)
     const slug = title.toLowerCase().split(" ").join("-");
 
     const taskExists = await Task.findOne({ slug });
@@ -96,8 +97,10 @@ export const createTask = async (req: Request, res: Response) => {
 
     if (file) {
       const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path
-        
+        file.path,
+        {
+          folder: "matara-tasks"
+        }
       );
       task.icon = { url, public_id };
     }
@@ -211,6 +214,43 @@ export const changePassword = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error changing password:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const updateTask = async (req: Request, res: Response) => {
+  try {
+    const { title, description, points, link } = req.body;
+    const { slug } = req.params;
+    const { file } = req;
+
+    const task = await Task.findOne({ slug });
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (file) {
+      if (task.icon?.public_id) {
+        await cloudinary.uploader.destroy(task.icon.public_id);
+      }
+      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+        file.path
+      );
+      task.icon = { url, public_id };
+    }
+
+    task.title = title ?? task.title;
+    task.description = description ?? task.description;
+    task.points = points ?? task.points;
+    task.link = link ?? task.link;
+
+    const updated = await task.save();
+    res.status(200).json({
+      task: updated,
+      message: "Task updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating task:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 

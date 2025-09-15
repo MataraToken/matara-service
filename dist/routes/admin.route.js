@@ -15,5 +15,6 @@ router.post("/tasks", admin_1.isAdmin, middleware_1.taskValidator, upload_1.defa
 router.get("/users", admin_1.isAdmin, admin_controller_1.getUsers);
 router.get("/tasks", admin_1.isAdmin, admin_controller_1.getTasks);
 router.delete("/tasks/:slug", admin_1.isAdmin, admin_controller_1.deleteTask);
+router.put("/tasks/:slug", admin_1.isAdmin, upload_1.default.single("icon"), admin_controller_1.updateTask);
 exports.default = router;
 //# sourceMappingURL=admin.route.js.map

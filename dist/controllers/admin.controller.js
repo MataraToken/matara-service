@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePassword = exports.getLeaderboard = exports.getSummary = exports.deleteTask = exports.getTasks = exports.createTask = exports.getUsers = exports.loginAdmin = exports.registerAdmin = void 0;
+exports.updateTask = exports.changePassword = exports.getLeaderboard = exports.getSummary = exports.deleteTask = exports.getTasks = exports.createTask = exports.getUsers = exports.loginAdmin = exports.registerAdmin = void 0;
 const user_model_1 = __importDefault(require("../model/user.model"));
 const task_model_1 = __importDefault(require("../model/task.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
@@ -81,6 +81,7 @@ const createTask = async (req, res) => {
     try {
         const { file } = req;
         const { title, description, points, link } = req.body;
+        console.log(req.body);
         const slug = title.toLowerCase().split(" ").join("-");
         const taskExists = await task_model_1.default.findOne({ slug });
         if (taskExists) {
@@ -90,7 +91,9 @@ const createTask = async (req, res) => {
         }
         const task = new task_model_1.default({ title, slug, description, points, link });
         if (file) {
-            const { secure_url: url, public_id } = await cloud_1.default.uploader.upload(file.path);
+            const { secure_url: url, public_id } = await cloud_1.default.uploader.upload(file.path, {
+                folder: "matara-tasks"
+            });
             task.icon = { url, public_id };
         }
         await task.save();
@@ -201,4 +204,36 @@ const changePassword = async (req, res) => {
     }
 };
 exports.changePassword = changePassword;
+const updateTask = async (req, res) => {
+    try {
+        const { title, description, points, link } = req.body;
+        const { slug } = req.params;
+        const { file } = req;
+        const task = await task_model_1.default.findOne({ slug });
+        if (!task) {
+            return res.status(404).json({ message: "Task not found" });
+        }
+        if (file) {
+            if (task.icon?.public_id) {
+                await cloud_1.default.uploader.destroy(task.icon.public_id);
+            }
+            const { secure_url: url, public_id } = await cloud_1.default.uploader.upload(file.path);
+            task.icon = { url, public_id };
+        }
+        task.title = title ?? task.title;
+        task.description = description ?? task.description;
+        task.points = points ?? task.points;
+        task.link = link ?? task.link;
+        const updated = await task.save();
+        res.status(200).json({
+            task: updated,
+            message: "Task updated successfully",
+        });
+    }
+    catch (error) {
+        console.error("Error updating task:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+exports.updateTask = updateTask;
 //# sourceMappingURL=admin.controller.js.map
