@@ -27,11 +27,11 @@ export const registerUser = async (req: Request, res: Response) => {
       firstName,
     });
 
-    const initialPoints = 20;
-    const additionalPoints = 10;
+    const initialPoints = 1000;
+    const additionalPoints = 500;
     const newPoints = new Point({
       userId: newUser._id,
-      points: initialPoints + additionalPoints,
+      points: initialPoints,
     });
 
     if (referralCode) {
