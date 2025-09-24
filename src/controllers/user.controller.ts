@@ -27,8 +27,8 @@ export const registerUser = async (req: Request, res: Response) => {
       firstName,
     });
 
-    const initialPoints = 1000;
-    const additionalPoints = 500;
+    const initialPoints = 100;
+    const additionalPoints = 50;
     const newPoints = new Point({
       userId: newUser._id,
       points: initialPoints,
@@ -104,7 +104,7 @@ export const getReferredUsers = async (req: Request, res: Response) => {
 
     const referralsWithPoints = referrals.map((referral: any) => ({
       ...referral,
-      points: pointsMap.get(referral._id.toString()) || 30000,
+      points: pointsMap.get(referral._id.toString()) || 50,
     }));
 
     return res.status(200).json({
