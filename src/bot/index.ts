@@ -74,7 +74,7 @@ bot.start(async (ctx) => {
     
     if (!username) {
       return ctx.reply(
-        "Please set a username in your Telegram account settings to proceed."
+        "Please set a username in your Telegram account settings and click start again to proceed."
       );
     }
 
