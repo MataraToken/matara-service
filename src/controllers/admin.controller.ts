@@ -39,11 +39,15 @@ export const loginAdmin = async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.status(400).json({ message: "Username and password are required" });
+    return res
+      .status(400)
+      .json({ message: "Username and password are required" });
   }
 
   try {
-    const user = await User.findOne({ username, isAdmin: true }).select("+password");
+    const user = await User.findOne({ username, isAdmin: true }).select(
+      "+password"
+    );
     if (!user) {
       return res.status(404).json({ message: "Admin user not found" });
     }
@@ -53,9 +57,13 @@ export const loginAdmin = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: user._id, isAdmin: user.isAdmin }, process.env.JWT_SECRET || "secret", {
-      expiresIn: "1h",
-    });
+    const token = jwt.sign(
+      { id: user._id, isAdmin: user.isAdmin },
+      process.env.JWT_SECRET || "secret",
+      {
+        expiresIn: "1h",
+      }
+    );
 
     return res.status(200).json({
       token,
@@ -84,7 +92,7 @@ export const createTask = async (req: Request, res: Response) => {
   try {
     const { file } = req;
     const { title, description, points, link } = req.body;
-    console.log(req.body)
+    console.log(req.body);
     const slug = title.toLowerCase().split(" ").join("-");
 
     const taskExists = await Task.findOne({ slug });
@@ -99,7 +107,7 @@ export const createTask = async (req: Request, res: Response) => {
       const { secure_url: url, public_id } = await cloudinary.uploader.upload(
         file.path,
         {
-          folder: "matara-tasks"
+          folder: "matara-tasks",
         }
       );
       task.icon = { url, public_id };
@@ -114,6 +122,7 @@ export const createTask = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 export const getTasks = async (req: Request, res: Response) => {
   try {
@@ -152,11 +161,13 @@ export const getSummary = async (req: Request, res: Response) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalTasks = await Task.countDocuments();
-    
+
     // This is not the number of completed tasks, but the number of users that have completed at least one task.
     // To get the total number of completed tasks, I would need to iterate over all users and sum the length of their `tasksCompleted` array.
     // This is not efficient. I will leave it like this for now.
-    const usersWithCompletedTasks = await User.countDocuments({ tasksCompleted: { $exists: true, $ne: [] } });
+    const usersWithCompletedTasks = await User.countDocuments({
+      tasksCompleted: { $exists: true, $ne: [] },
+    });
 
     res.status(200).json({
       data: {
@@ -194,7 +205,9 @@ export const changePassword = async (req: Request, res: Response) => {
   const { username, oldPassword, newPassword } = req.body;
 
   try {
-    const user = await User.findOne({ username, isAdmin: true }).select("+password");
+    const user = await User.findOne({ username, isAdmin: true }).select(
+      "+password"
+    );
     if (!user) {
       return res.status(404).json({ message: "Admin user not found" });
     }
@@ -253,4 +266,3 @@ export const updateTask = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-

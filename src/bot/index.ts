@@ -1,6 +1,3 @@
-
-
-
 import { Telegraf, Markup } from "telegraf";
 import axios from "axios";
 
