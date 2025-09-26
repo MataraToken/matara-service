@@ -40,21 +40,23 @@ const webhookPath = `/telegraf/${TELEGRAM_WEBHOOK_PATH}`;
 
 const allowedOrigins = [
   "https://matara-admin.vercel.app", // your frontend
+  "http://localhost:5173",  
   "http://localhost:3000",  
   "https://matara-tma.vercel.app"         // local dev
 ];
 
+// Put this BEFORE your routes
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    }
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// Handle all OPTIONS requests
+app.options("*", cors());
 
 app.use(express.json());
 app.use(morgan("dev"));
