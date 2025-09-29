@@ -172,3 +172,20 @@ export const getUsers = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+export const getLeaderboard = async (req: Request, res: Response) => {
+  try {
+    const topUsers = await Point.find()
+      .sort({ points: -1 })
+      .limit(5)
+      .populate("userId", "username profilePicture");
+
+    res.status(200).json({
+      data: topUsers,
+      message: "Leaderboard fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching leaderboard:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
