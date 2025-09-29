@@ -108,7 +108,7 @@ bot.start(async (ctx) => {
               [
                 Markup.button.url(
                   "Join community",
-                  `https://t.me/FTLDOfficial`
+                  `https://t.me/MATARA_TOKEN`
                 ),
               ],
             ],
