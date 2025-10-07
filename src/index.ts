@@ -42,7 +42,7 @@ const allowedOrigins = [
   "https://matara-admin.vercel.app", // your frontend
   "http://localhost:5173",  
   "http://localhost:3000",  
-  "https://matara-tma.vercel.app"         // local dev
+  "https://matara-next.vercel.app"         // local dev
 ];
 
 // Put this BEFORE your routes
