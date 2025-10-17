@@ -1,4 +1,4 @@
-import { generateReferralCode } from "../utils";
+import { generateReferralCode, generateBSCWallet, encryptPrivateKey } from "../utils";
 import User from "../model/user.model";
 import { Request, Response } from "express";
 import Point from "../model/points.model";
@@ -19,12 +19,20 @@ export const registerUser = async (req: Request, res: Response) => {
     }
 
     const newReferralId = generateReferralCode();
+    
+    // Generate BSC wallet for the user
+    const wallet = generateBSCWallet();
+    const encryptionPassword = process.env.WALLET_ENCRYPTION_PASSWORD || 'default-encryption-key';
+    const encryptedPrivateKey = encryptPrivateKey(wallet.privateKey, encryptionPassword);
+    
     const newUser = new User({
       username,
       referralCode: newReferralId,
       premium,
       profilePicture,
       firstName,
+      walletAddress: wallet.address,
+      encryptedPrivateKey,
     });
 
     const initialPoints = 100;
@@ -51,6 +59,7 @@ export const registerUser = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       message: "User registered successfully",
+      walletAddress: wallet.address,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -70,7 +79,7 @@ export const getUser = async (req: Request, res: Response) => {
 
     const userPoints = await Point.findOne({ userId: user._id }).lean();
 
-    const { userBoosts, tasksCompleted, milestonesCompleted, referrals, ...filteredUser } = user;
+    const { userBoosts, tasksCompleted, milestonesCompleted, referrals, encryptedPrivateKey, ...filteredUser } = user;
 
     const mergedData = { ...filteredUser, ...userPoints };
 
@@ -90,7 +99,7 @@ export const getReferredUsers = async (req: Request, res: Response) => {
   try {
     const user = await User.findOne({ username }).populate(
       "referrals",
-      "username profilePicture premium"
+      "username profilePicture premium walletAddress"
     ).lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -138,7 +147,7 @@ export const saveOnboarding = async (req: Request, res: Response) => {
 
 export const userRanking = async (req: Request, res: Response) => {
   try {
-    const users = await User.find({}, 'username').lean();
+    const users = await User.find({}, 'username walletAddress').lean();
     const userIds = users.map(user => user._id);
     
     const points = await Point.find({ userId: { $in: userIds } }, 'userId points').lean();
@@ -146,6 +155,7 @@ export const userRanking = async (req: Request, res: Response) => {
     
     const userRankings = users.map(user => ({
       username: user.username,
+      walletAddress: user.walletAddress,
       totalEarnings: pointsMap.get(user._id.toString()) || 0
     }))
     .sort((a, b) => b.totalEarnings - a.totalEarnings);
@@ -162,7 +172,7 @@ export const userRanking = async (req: Request, res: Response) => {
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    const users = await User.find().lean();
+    const users = await User.find().select('-encryptedPrivateKey').lean();
     res.status(200).json({
       data: users,
       message: "Users fetched successfully",
@@ -178,7 +188,7 @@ export const getLeaderboard = async (req: Request, res: Response) => {
     const topUsers = await Point.find()
       .sort({ points: -1 })
       .limit(5)
-      .populate("userId", "username profilePicture");
+      .populate("userId", "username profilePicture walletAddress");
 
     res.status(200).json({
       data: topUsers,

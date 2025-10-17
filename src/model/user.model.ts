@@ -76,7 +76,16 @@ const userSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: "Boost",
       },
-    ]
+    ],
+    walletAddress: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    encryptedPrivateKey: {
+      type: String,
+      select: false,
+    }
   },
   { timestamps: true }
 );
