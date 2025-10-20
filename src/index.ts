@@ -16,6 +16,7 @@ import bonusRouter from "./routes/bonus.route";
 import mineRouter from "./routes/mine.route";
 import statsRouter from "./routes/stats.route";
 import adminRouter from "./routes/admin.route";
+import authRouter from "./routes/auth.route";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -75,6 +76,7 @@ app.use("/api/bonus", bonusRouter);
 app.use("/api/mine", mineRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/auth", authRouter);
 
 
 let botRunning = false;

@@ -1,5 +1,6 @@
-import { NextFunction, Response } from "express";
+import { NextFunction, Response, Request } from "express";
 import { check, validationResult, ValidationError } from "express-validator";
+import { authenticateToken } from "./auth";
 
 export const taskValidator = [
   check("title")
@@ -26,3 +27,5 @@ export const validate = (req: Request, res: Response, next: NextFunction) => {
   }
   next();
 };
+
+export { authenticateToken };
