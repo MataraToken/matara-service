@@ -3,15 +3,16 @@ import { createTask, deleteTask, getTasks, getUsers, loginAdmin, registerAdmin, 
 import { isAdmin } from "../middleware/admin";
 import { taskValidator, validate } from "../middleware";
 import upload from "../middleware/upload";
+import { getTasksByProjectId } from "../controllers/task.controller";
 
 const router = Router();
 
 router.post("/register", registerAdmin);
 router.post("/login", loginAdmin);
-router.post("/tasks", isAdmin, taskValidator, validate, upload.single("icon"), createTask);
+router.post("/tasks", isAdmin, validate, upload.single("icon"), createTask);
 
 router.get("/users", isAdmin, getUsers);
-router.get("/tasks", isAdmin, getTasks);
+router.get("/project/:projectId/tasks", isAdmin, getTasksByProjectId);
 router.delete("/tasks/:slug", isAdmin, deleteTask);
 router.put("/tasks/:slug", isAdmin, upload.single("icon"), updateTask);
 

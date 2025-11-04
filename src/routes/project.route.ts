@@ -14,7 +14,7 @@ import upload from "../middleware/upload";
 const router = Router();
 
 // Admin-only routes
-router.post("/", isAdmin, projectValidator, validate, upload.single("logo"), createProject);
+router.post("/", isAdmin,  validate, upload.single("logo"), createProject);
 router.put("/:slug", isAdmin, upload.single("logo"), updateProject);
 router.delete("/:slug", isAdmin, deleteProject);
 

@@ -55,6 +55,42 @@ export const getTask = async (req: Request, res: Response) => {
   }
 };
 
+export const getTasksByProjectId = async (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+
+    // Validate projectId format
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({ message: "Invalid projectId format" });
+    }
+
+    // Check if project exists
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    // Fetch all tasks under this project
+    const tasks = await Task.find({ projectId }).populate("projectId", "name slug description logo socials status numberOfParticipants joinedUsers").lean();
+
+    res.status(200).json({
+      data: tasks,
+      project: {
+        _id: project._id,
+        name: project.name,
+        slug: project.slug,
+        status: project.status,
+        currentParticipants: project.joinedUsers.length,
+        maxUsers: project.numberOfParticipants,
+      },
+      message: "Tasks fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching tasks by project ID:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const updateTask = async (req: Request, res: Response) => {
   try {
     const { title, description, points, link } = req.body;
@@ -129,12 +165,12 @@ export const completeTask = async (req: Request, res: Response) => {
         return res.status(404).json({ message: "Project not found for this task" });
       }
 
+      // Check if user has joined the project (now checking by username)
+      const hasJoined = project.joinedUsers.includes(user.username);
+      
       // Check if project is completed (closed)
       if (project.status === "completed") {
         // Only allow users who have joined to complete tasks
-        const hasJoined = project.joinedUsers.some(
-          (id) => id.toString() === user._id.toString()
-        );
         if (!hasJoined) {
           await session.abortTransaction();
           session.endSession();
@@ -144,9 +180,6 @@ export const completeTask = async (req: Request, res: Response) => {
         }
       } else {
         // For in-progress projects, check if user has joined
-        const hasJoined = project.joinedUsers.some(
-          (id) => id.toString() === user._id.toString()
-        );
         if (!hasJoined) {
           await session.abortTransaction();
           session.endSession();
