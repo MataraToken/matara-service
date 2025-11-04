@@ -11,6 +11,11 @@ const taskSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      required: true,
+    },
     icon: {
       type: Object,
       url: {

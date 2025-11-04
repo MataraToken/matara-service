@@ -57,11 +57,11 @@ bot.start(async (ctx) => {
         const firstName = ctx.from?.first_name || "";
         const username = ctx.from?.username;
         if (!username) {
-            return ctx.reply("Please set a username in your Telegram account settings to proceed.");
+            return ctx.reply("Please set a username in your Telegram account settings and click start again to proceed.");
         }
         const profilePicture = await getProfilePicture(ctx.from.id);
         // Use your actual web app URL here instead of ngrok
-        const weburl = process.env.WEB_APP_URL || "https://matara-tma.vercel.app/";
+        const weburl = process.env.WEB_APP_URL || "https://matara-next.vercel.app/";
         // const weburl =  "https://jurstadev.xyz/";
         const imageUrl = "https://res.cloudinary.com/wallnet/image/upload/t_new-mat/v1743246776/MATARA_kqx0kj.png";
         console.log(`Registering user: ${username}`);
@@ -80,7 +80,7 @@ bot.start(async (ctx) => {
                             telegraf_1.Markup.button.webApp("Start now!", `${weburl}`),
                         ],
                         [
-                            telegraf_1.Markup.button.url("Join community", `https://t.me/FTLDOfficial`),
+                            telegraf_1.Markup.button.url("Join community", `https://t.me/MATARA_TOKEN`),
                         ],
                     ],
                 },

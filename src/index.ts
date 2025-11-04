@@ -9,6 +9,7 @@ import bot from "./bot";
 import WebSocketService from "./ws";
 import userRoute from "./routes/user.route";
 import taskRouter from "./routes/task.route";
+import projectRouter from "./routes/project.route";
 import pingRouter from "./routes/ping.route";
 import milestoneRouter from "./routes/milestones.route";
 import boostRouter from "./routes/boosts.route";
@@ -69,6 +70,7 @@ app.get('/', (req, res) => {
 // API routes
 app.use("/api/user", userRoute);
 app.use("/api/task", taskRouter);
+app.use("/api/project", projectRouter);
 app.use("/api/ping", pingRouter);
 app.use("/api/milestone", milestoneRouter);
 app.use("/api/boost", boostRouter);

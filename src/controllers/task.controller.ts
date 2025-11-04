@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import Task from "../model/task.model";
 import User from "../model/user.model";
+import Project from "../model/project.model";
 import cloudinary from "../cloud";
 import mongoose from "mongoose";
 import Point from "../model/points.model";
@@ -8,6 +9,7 @@ import Point from "../model/points.model";
 
 export const getUserTasks = async (req: Request, res: Response) => {
   const { username } = req.params;
+  const { projectId } = req.query;
   try {
     const user = await User.findOne({ username }).select("tasksCompleted").lean();
     if (!user) {
@@ -16,7 +18,13 @@ export const getUserTasks = async (req: Request, res: Response) => {
 
     const completedTaskIds = new Set(user.tasksCompleted.map(id => id.toString()));
 
-    const allTasks = await Task.find().lean();
+    // Build query - filter by projectId if provided
+    const query: any = {};
+    if (projectId) {
+      query.projectId = projectId;
+    }
+
+    const allTasks = await Task.find(query).lean();
 
     const tasksWithCompletionStatus = allTasks.map((task) => ({
       ...task,
@@ -36,7 +44,7 @@ export const getUserTasks = async (req: Request, res: Response) => {
 export const getTask = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const task = await Task.findOne({ slug });
+    const task = await Task.findOne({ slug }).populate("projectId", "name slug description logo socials");
     if (!task) {
       return res.status(404).json({ message: "Task not found" });
     }
@@ -110,6 +118,43 @@ export const completeTask = async (req: Request, res: Response) => {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: "Task already completed" });
+    }
+
+    // Check if task belongs to a project and if user has joined that project
+    if (task.projectId) {
+      const project = await Project.findById(task.projectId).session(session);
+      if (!project) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Project not found for this task" });
+      }
+
+      // Check if project is completed (closed)
+      if (project.status === "completed") {
+        // Only allow users who have joined to complete tasks
+        const hasJoined = project.joinedUsers.some(
+          (id) => id.toString() === user._id.toString()
+        );
+        if (!hasJoined) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(403).json({ 
+            message: "Project is closed. Only users who joined the project can complete tasks." 
+          });
+        }
+      } else {
+        // For in-progress projects, check if user has joined
+        const hasJoined = project.joinedUsers.some(
+          (id) => id.toString() === user._id.toString()
+        );
+        if (!hasJoined) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(403).json({ 
+            message: "You must join the project before completing tasks." 
+          });
+        }
+      }
     }
 
     const points = await Point.findOne({ userId: user._id }).session(session);

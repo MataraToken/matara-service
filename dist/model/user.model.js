@@ -52,6 +52,10 @@ const userSchema = new mongoose_1.default.Schema({
         type: String,
         select: false,
     },
+    hasPassword: {
+        type: Boolean,
+        default: false
+    },
     autoTapEndTime: { type: Date, default: null },
     autoTapPaused: { type: Boolean, default: false },
     tasksCompleted: [
@@ -79,7 +83,16 @@ const userSchema = new mongoose_1.default.Schema({
             type: mongoose_1.default.Schema.Types.ObjectId,
             ref: "Boost",
         },
-    ]
+    ],
+    walletAddress: {
+        type: String,
+        unique: true,
+        sparse: true,
+    },
+    encryptedPrivateKey: {
+        type: String,
+        select: false,
+    }
 }, { timestamps: true });
 const User = mongoose_1.default.model("User", userSchema);
 exports.default = User;

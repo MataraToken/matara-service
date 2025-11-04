@@ -14,6 +14,7 @@ const bot_1 = __importDefault(require("./bot"));
 const ws_1 = __importDefault(require("./ws"));
 const user_route_1 = __importDefault(require("./routes/user.route"));
 const task_route_1 = __importDefault(require("./routes/task.route"));
+const project_route_1 = __importDefault(require("./routes/project.route"));
 const ping_route_1 = __importDefault(require("./routes/ping.route"));
 const milestones_route_1 = __importDefault(require("./routes/milestones.route"));
 const boosts_route_1 = __importDefault(require("./routes/boosts.route"));
@@ -21,6 +22,7 @@ const bonus_route_1 = __importDefault(require("./routes/bonus.route"));
 const mine_route_1 = __importDefault(require("./routes/mine.route"));
 const stats_route_1 = __importDefault(require("./routes/stats.route"));
 const admin_route_1 = __importDefault(require("./routes/admin.route"));
+const auth_route_1 = __importDefault(require("./routes/auth.route"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -36,7 +38,21 @@ if (!TELEGRAM_WEBHOOK_PATH) {
     throw new Error("TELEGRAM_WEBHOOK_URL is required");
 }
 const webhookPath = `/telegraf/${TELEGRAM_WEBHOOK_PATH}`;
-app.use((0, cors_1.default)({ origin: true }));
+const allowedOrigins = [
+    "https://matara-admin.vercel.app", // your frontend
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://matara-tma.vercel.app" // local dev
+];
+// Put this BEFORE your routes
+app.use((0, cors_1.default)({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+}));
+// Handle all OPTIONS requests
+app.options("*", (0, cors_1.default)());
 app.use(express_1.default.json());
 app.use((0, morgan_1.default)("dev"));
 app.get('/', (req, res) => {
@@ -45,6 +61,7 @@ app.get('/', (req, res) => {
 // API routes
 app.use("/api/user", user_route_1.default);
 app.use("/api/task", task_route_1.default);
+app.use("/api/project", project_route_1.default);
 app.use("/api/ping", ping_route_1.default);
 app.use("/api/milestone", milestones_route_1.default);
 app.use("/api/boost", boosts_route_1.default);
@@ -52,6 +69,7 @@ app.use("/api/bonus", bonus_route_1.default);
 app.use("/api/mine", mine_route_1.default);
 app.use("/api/stats", stats_route_1.default);
 app.use("/api/admin", admin_route_1.default);
+app.use("/api/auth", auth_route_1.default);
 let botRunning = false;
 let isSettingUpBot = false;
 const setupBot = async () => {

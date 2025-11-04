@@ -1,14 +1,14 @@
 import { Router } from "express";
 import { createTask, deleteTask, getTasks, getUsers, loginAdmin, registerAdmin, updateTask } from "../controllers/admin.controller";
 import { isAdmin } from "../middleware/admin";
-import { taskValidator } from "../middleware";
+import { taskValidator, validate } from "../middleware";
 import upload from "../middleware/upload";
 
 const router = Router();
 
 router.post("/register", registerAdmin);
 router.post("/login", loginAdmin);
-router.post("/tasks", isAdmin, taskValidator, upload.single("icon"), createTask);
+router.post("/tasks", isAdmin, taskValidator, validate, upload.single("icon"), createTask);
 
 router.get("/users", isAdmin, getUsers);
 router.get("/tasks", isAdmin, getTasks);

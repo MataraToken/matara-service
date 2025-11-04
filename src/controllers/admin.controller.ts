@@ -1,10 +1,12 @@
 import { Request, Response } from "express";
 import User from "../model/user.model";
 import Task from "../model/task.model";
+import Project from "../model/project.model";
 import Point from "../model/points.model";
 import cloudinary from "../cloud";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 export const registerAdmin = async (req: Request, res: Response) => {
   const { username, password, firstName } = req.body;
@@ -91,8 +93,35 @@ export const getUsers = async (req: Request, res: Response) => {
 export const createTask = async (req: Request, res: Response) => {
   try {
     const { file } = req;
-    const { title, description, points, link } = req.body;
-    console.log(req.body);
+    const { title, description, points, link, projectId } = req.body;
+
+    if (!projectId) {
+      return res.status(400).json({
+        message: "projectId is required",
+      });
+    }
+
+    // Validate projectId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({
+        message: "Invalid projectId format",
+      });
+    }
+
+    // Check if project exists
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        message: "Project not found",
+      });
+    }
+
+    if (!title || !description || !points || !link) {
+      return res.status(400).json({
+        message: "Title, description, points, and link are required",
+      });
+    }
+
     const slug = title.toLowerCase().split(" ").join("-");
 
     const taskExists = await Task.findOne({ slug });
@@ -101,7 +130,8 @@ export const createTask = async (req: Request, res: Response) => {
         message: "Task already exists",
       });
     }
-    const task = new Task({ title, slug, description, points, link });
+    
+    const task = new Task({ title, slug, description, points, link, projectId });
 
     if (file) {
       const { secure_url: url, public_id } = await cloudinary.uploader.upload(
@@ -116,6 +146,7 @@ export const createTask = async (req: Request, res: Response) => {
     await task.save();
     res.status(201).json({
       message: "Task created successfully",
+      data: task,
     });
   } catch (error) {
     console.error("Error creating task:", error);
@@ -126,7 +157,15 @@ export const createTask = async (req: Request, res: Response) => {
 
 export const getTasks = async (req: Request, res: Response) => {
   try {
-    const tasks = await Task.find().lean();
+    const { projectId } = req.query;
+    
+    // Build query - filter by projectId if provided
+    const query: any = {};
+    if (projectId) {
+      query.projectId = projectId;
+    }
+
+    const tasks = await Task.find(query).lean().populate("projectId", "title slug");
     res.status(200).json({
       data: tasks,
       message: "Tasks fetched successfully",

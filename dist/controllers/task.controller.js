@@ -6,18 +6,25 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.completeTask = exports.updateTask = exports.getTask = exports.getUserTasks = void 0;
 const task_model_1 = __importDefault(require("../model/task.model"));
 const user_model_1 = __importDefault(require("../model/user.model"));
+const project_model_1 = __importDefault(require("../model/project.model"));
 const cloud_1 = __importDefault(require("../cloud"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const points_model_1 = __importDefault(require("../model/points.model"));
 const getUserTasks = async (req, res) => {
     const { username } = req.params;
+    const { projectId } = req.query;
     try {
         const user = await user_model_1.default.findOne({ username }).select("tasksCompleted").lean();
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
         const completedTaskIds = new Set(user.tasksCompleted.map(id => id.toString()));
-        const allTasks = await task_model_1.default.find().lean();
+        // Build query - filter by projectId if provided
+        const query = {};
+        if (projectId) {
+            query.projectId = projectId;
+        }
+        const allTasks = await task_model_1.default.find(query).lean();
         const tasksWithCompletionStatus = allTasks.map((task) => ({
             ...task,
             completed: completedTaskIds.has(task._id.toString()),
@@ -36,7 +43,7 @@ exports.getUserTasks = getUserTasks;
 const getTask = async (req, res) => {
     try {
         const { slug } = req.params;
-        const task = await task_model_1.default.findOne({ slug });
+        const task = await task_model_1.default.findOne({ slug }).populate("projectId", "name slug description logo socials");
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }
@@ -102,6 +109,38 @@ const completeTask = async (req, res) => {
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({ message: "Task already completed" });
+        }
+        // Check if task belongs to a project and if user has joined that project
+        if (task.projectId) {
+            const project = await project_model_1.default.findById(task.projectId).session(session);
+            if (!project) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(404).json({ message: "Project not found for this task" });
+            }
+            // Check if project is completed (closed)
+            if (project.status === "completed") {
+                // Only allow users who have joined to complete tasks
+                const hasJoined = project.joinedUsers.some((id) => id.toString() === user._id.toString());
+                if (!hasJoined) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    return res.status(403).json({
+                        message: "Project is closed. Only users who joined the project can complete tasks."
+                    });
+                }
+            }
+            else {
+                // For in-progress projects, check if user has joined
+                const hasJoined = project.joinedUsers.some((id) => id.toString() === user._id.toString());
+                if (!hasJoined) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    return res.status(403).json({
+                        message: "You must join the project before completing tasks."
+                    });
+                }
+            }
         }
         const points = await points_model_1.default.findOne({ userId: user._id }).session(session);
         if (!points) {

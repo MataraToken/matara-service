@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getUsers = exports.userRanking = exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
+exports.getLeaderboard = exports.getUsers = exports.userRanking = exports.saveOnboarding = exports.getReferredUsers = exports.getUser = exports.registerUser = void 0;
 const utils_1 = require("../utils");
 const user_model_1 = __importDefault(require("../model/user.model"));
 const points_model_1 = __importDefault(require("../model/points.model"));
@@ -20,15 +20,21 @@ const registerUser = async (req, res) => {
             return res.status(200).json({ message: "Username already exists" });
         }
         const newReferralId = (0, utils_1.generateReferralCode)();
+        // Generate BSC wallet for the user
+        const wallet = (0, utils_1.generateBSCWallet)();
+        const encryptionPassword = process.env.WALLET_ENCRYPTION_PASSWORD || 'default-encryption-key';
+        const encryptedPrivateKey = (0, utils_1.encryptPrivateKey)(wallet.privateKey, encryptionPassword);
         const newUser = new user_model_1.default({
             username,
             referralCode: newReferralId,
             premium,
             profilePicture,
             firstName,
+            walletAddress: wallet.address,
+            encryptedPrivateKey,
         });
-        const initialPoints = 1000;
-        const additionalPoints = 500;
+        const initialPoints = 100;
+        const additionalPoints = 50;
         const newPoints = new points_model_1.default({
             userId: newUser._id,
             points: initialPoints,
@@ -47,6 +53,7 @@ const registerUser = async (req, res) => {
         session.endSession();
         return res.status(201).json({
             message: "User registered successfully",
+            walletAddress: wallet.address,
         });
     }
     catch (error) {
@@ -65,7 +72,7 @@ const getUser = async (req, res) => {
             return res.status(404).json({ message: "User not found" });
         }
         const userPoints = await points_model_1.default.findOne({ userId: user._id }).lean();
-        const { userBoosts, tasksCompleted, milestonesCompleted, referrals, ...filteredUser } = user;
+        const { userBoosts, tasksCompleted, milestonesCompleted, referrals, encryptedPrivateKey, ...filteredUser } = user;
         const mergedData = { ...filteredUser, ...userPoints };
         return res.status(200).json({
             data: mergedData,
@@ -81,7 +88,7 @@ exports.getUser = getUser;
 const getReferredUsers = async (req, res) => {
     const { username } = req.query;
     try {
-        const user = await user_model_1.default.findOne({ username }).populate("referrals", "username profilePicture premium").lean();
+        const user = await user_model_1.default.findOne({ username }).populate("referrals", "username profilePicture premium walletAddress").lean();
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
@@ -91,7 +98,7 @@ const getReferredUsers = async (req, res) => {
         const pointsMap = new Map(points.map(p => [p.userId.toString(), p.points]));
         const referralsWithPoints = referrals.map((referral) => ({
             ...referral,
-            points: pointsMap.get(referral._id.toString()) || 30000,
+            points: pointsMap.get(referral._id.toString()) || 50,
         }));
         return res.status(200).json({
             data: referralsWithPoints,
@@ -125,12 +132,13 @@ const saveOnboarding = async (req, res) => {
 exports.saveOnboarding = saveOnboarding;
 const userRanking = async (req, res) => {
     try {
-        const users = await user_model_1.default.find({}, 'username').lean();
+        const users = await user_model_1.default.find({}, 'username walletAddress').lean();
         const userIds = users.map(user => user._id);
         const points = await points_model_1.default.find({ userId: { $in: userIds } }, 'userId points').lean();
         const pointsMap = new Map(points.map(p => [p.userId.toString(), p.points]));
         const userRankings = users.map(user => ({
             username: user.username,
+            walletAddress: user.walletAddress,
             totalEarnings: pointsMap.get(user._id.toString()) || 0
         }))
             .sort((a, b) => b.totalEarnings - a.totalEarnings);
@@ -147,7 +155,7 @@ const userRanking = async (req, res) => {
 exports.userRanking = userRanking;
 const getUsers = async (req, res) => {
     try {
-        const users = await user_model_1.default.find().lean();
+        const users = await user_model_1.default.find().select('-encryptedPrivateKey').lean();
         res.status(200).json({
             data: users,
             message: "Users fetched successfully",
@@ -159,4 +167,21 @@ const getUsers = async (req, res) => {
     }
 };
 exports.getUsers = getUsers;
+const getLeaderboard = async (req, res) => {
+    try {
+        const topUsers = await points_model_1.default.find()
+            .sort({ points: -1 })
+            .limit(5)
+            .populate("userId", "username profilePicture walletAddress");
+        res.status(200).json({
+            data: topUsers,
+            message: "Leaderboard fetched successfully",
+        });
+    }
+    catch (error) {
+        console.error("Error fetching leaderboard:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+exports.getLeaderboard = getLeaderboard;
 //# sourceMappingURL=user.controller.js.map

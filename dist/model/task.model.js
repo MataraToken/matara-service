@@ -14,6 +14,11 @@ const taskSchema = new mongoose_1.default.Schema({
         required: true,
         unique: true,
     },
+    projectId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: "Project",
+        required: true,
+    },
     icon: {
         type: Object,
         url: {
