@@ -1,5 +1,15 @@
 import { Router } from "express";
-import { createTask, deleteTask, getTasks, getUsers, loginAdmin, registerAdmin, updateTask } from "../controllers/admin.controller";
+import { 
+  createTask, 
+  deleteTask, 
+  getTasks, 
+  getUsers, 
+  loginAdmin, 
+  registerAdmin, 
+  updateTask,
+  getTaskSubmissionsForReview,
+  reviewTaskSubmission,
+} from "../controllers/admin.controller";
 import { isAdmin } from "../middleware/admin";
 import { taskValidator, validate } from "../middleware";
 import upload from "../middleware/upload";
@@ -16,5 +26,8 @@ router.get("/project/:projectId/tasks", isAdmin, getTasksByProjectId);
 router.delete("/tasks/:slug", isAdmin, deleteTask);
 router.put("/tasks/:slug", isAdmin, upload.single("icon"), updateTask);
 
+// Task submission review routes
+router.get("/task-submissions", isAdmin, getTaskSubmissionsForReview);
+router.post("/task-submissions/:submissionId/review", isAdmin, reviewTaskSubmission);
 
 export default router;

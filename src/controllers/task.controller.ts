@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Task from "../model/task.model";
 import User from "../model/user.model";
 import Project from "../model/project.model";
+import TaskSubmission from "../model/taskSubmission.model";
 import cloudinary from "../cloud";
 import mongoose from "mongoose";
 import Point from "../model/points.model";
@@ -26,10 +27,32 @@ export const getUserTasks = async (req: Request, res: Response) => {
 
     const allTasks = await Task.find(query).lean();
 
-    const tasksWithCompletionStatus = allTasks.map((task) => ({
-      ...task,
-      completed: completedTaskIds.has(task._id.toString()),
-    }));
+    // Get all task submissions for this user
+    const submissions = await TaskSubmission.find({ userId: user._id }).lean();
+    const submissionMap = new Map();
+    submissions.forEach((sub: any) => {
+      submissionMap.set(sub.taskId.toString(), {
+        status: sub.status,
+        proofUrl: sub.proofUrl,
+        reviewedBy: sub.reviewedBy,
+        reviewedAt: sub.reviewedAt,
+        rejectionReason: sub.rejectionReason,
+      });
+    });
+
+    const tasksWithCompletionStatus = allTasks.map((task) => {
+      const submission = submissionMap.get(task._id.toString());
+      return {
+        ...task,
+        _id: task._id.toString(),
+        completed: completedTaskIds.has(task._id.toString()),
+        submissionStatus: submission?.status || "non-started",
+        proofUrl: submission?.proofUrl,
+        reviewedBy: submission?.reviewedBy,
+        reviewedAt: submission?.reviewedAt,
+        rejectionReason: submission?.rejectionReason,
+      };
+    });
 
     res.status(200).json({
       data: tasksWithCompletionStatus,
@@ -130,12 +153,18 @@ export const updateTask = async (req: Request, res: Response) => {
 
 export const completeTask = async (req: Request, res: Response) => {
   const { slug } = req.params;
-  const { username } = req.body;
+  const { username, proofUrl } = req.body;
 
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
+    if (!proofUrl) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: "Proof URL is required" });
+    }
+
     const task = await Task.findOne({ slug }).session(session);
     if (!task) {
       await session.abortTransaction();
@@ -150,10 +179,32 @@ export const completeTask = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (user.tasksCompleted.includes(task._id)) {
+    // Check if user already has a completed submission
+    const existingSubmission = await TaskSubmission.findOne({
+      userId: user._id,
+      taskId: task._id,
+      status: "complete",
+    }).session(session);
+
+    if (existingSubmission) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: "Task already completed" });
+    }
+
+    // Check if there's already a submission in review
+    const reviewingSubmission = await TaskSubmission.findOne({
+      userId: user._id,
+      taskId: task._id,
+      status: "reviewing",
+    }).session(session);
+
+    if (reviewingSubmission) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Task submission is already under review" 
+      });
     }
 
     // Check if task belongs to a project and if user has joined that project
@@ -190,27 +241,34 @@ export const completeTask = async (req: Request, res: Response) => {
       }
     }
 
-    const points = await Point.findOne({ userId: user._id }).session(session);
-    if (!points) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ message: "Points not found" });
-    }
-
-    user.tasksCompleted.push(task._id);
-    points.points += task.points;
-
-    await user.save({ session });
-    await points.save({ session });
+    // Create or update task submission with reviewing status
+    const submission = await TaskSubmission.findOneAndUpdate(
+      { userId: user._id, taskId: task._id },
+      {
+        userId: user._id,
+        taskId: task._id,
+        username: user.username,
+        proofUrl,
+        status: "reviewing",
+      },
+      { upsert: true, new: true, session }
+    );
 
     await session.commitTransaction();
     session.endSession();
 
-    res.status(200).json({ message: "Task completed successfully" });
+    res.status(200).json({ 
+      message: "Task submission submitted for review",
+      data: {
+        submissionId: submission._id.toString(),
+        status: submission.status,
+        taskSlug: task.slug,
+      },
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error completing task:", error);
+    console.error("Error submitting task:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

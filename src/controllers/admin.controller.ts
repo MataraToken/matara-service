@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import User from "../model/user.model";
 import Task from "../model/task.model";
 import Project from "../model/project.model";
+import TaskSubmission from "../model/taskSubmission.model";
 import Point from "../model/points.model";
 import cloudinary from "../cloud";
 import bcrypt from "bcrypt";
@@ -302,6 +303,152 @@ export const updateTask = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error updating task:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getTaskSubmissionsForReview = async (req: Request, res: Response) => {
+  try {
+    const { status } = req.query;
+    
+    // Default to "reviewing" if no status provided
+    const queryStatus = status || "reviewing";
+    
+    const query: any = { status: queryStatus };
+    
+    const submissions = await TaskSubmission.find(query)
+      .populate("userId", "username profilePicture")
+      .populate("taskId", "title slug description points link icon")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const serializedSubmissions = submissions.map((submission: any) => ({
+      ...submission,
+      _id: submission._id.toString(),
+      userId: submission.userId._id.toString(),
+      taskId: submission.taskId._id.toString(),
+      user: {
+        _id: submission.userId._id.toString(),
+        username: submission.userId.username,
+        profilePicture: submission.userId.profilePicture,
+      },
+      task: {
+        _id: submission.taskId._id.toString(),
+        title: submission.taskId.title,
+        slug: submission.taskId.slug,
+        description: submission.taskId.description,
+        points: submission.taskId.points,
+        link: submission.taskId.link,
+        icon: submission.taskId.icon,
+      },
+    }));
+
+    res.status(200).json({
+      data: serializedSubmissions,
+      message: "Task submissions fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching task submissions:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const reviewTaskSubmission = async (req: Request, res: Response) => {
+  const { submissionId } = req.params;
+  const { action, rejectionReason } = req.body; // action: "approve" or "reject"
+  const adminUser = req.user; // From auth middleware
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!action || !["approve", "reject"].includes(action)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Action is required and must be 'approve' or 'reject'" 
+      });
+    }
+
+    const submission = await TaskSubmission.findById(submissionId).session(session);
+    if (!submission) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Task submission not found" });
+    }
+
+    if (submission.status !== "reviewing") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: `Task submission is already ${submission.status}` 
+      });
+    }
+
+    const user = await User.findById(submission.userId).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const task = await Task.findById(submission.taskId).session(session);
+    if (!task) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (action === "approve") {
+      // Update submission status to complete
+      submission.status = "complete";
+      submission.reviewedBy = adminUser?.username || "admin";
+      submission.reviewedAt = new Date();
+
+      // Award points and mark task as completed
+      const points = await Point.findOne({ userId: user._id }).session(session);
+      if (!points) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({ message: "Points not found" });
+      }
+
+      // Only add to tasksCompleted if not already there
+      if (!user.tasksCompleted.includes(task._id)) {
+        user.tasksCompleted.push(task._id);
+        points.points += task.points;
+      }
+
+      await user.save({ session });
+      await points.save({ session });
+    } else if (action === "reject") {
+      // Update submission status to rejected
+      submission.status = "rejected";
+      submission.reviewedBy = adminUser?.username || "admin";
+      submission.reviewedAt = new Date();
+      if (rejectionReason) {
+        submission.rejectionReason = rejectionReason;
+      }
+    }
+
+    await submission.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      message: `Task submission ${action === "approve" ? "approved" : "rejected"} successfully`,
+      data: {
+        submissionId: submission._id.toString(),
+        status: submission.status,
+        reviewedBy: submission.reviewedBy,
+        reviewedAt: submission.reviewedAt,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error reviewing task submission:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
