@@ -7,6 +7,7 @@ import morgan from "morgan";
 import "./db";
 import bot from "./bot";
 import WebSocketService from "./ws";
+import { startDepositListener, stopDepositListener } from "./services/depositListener.service";
 import userRoute from "./routes/user.route";
 import taskRouter from "./routes/task.route";
 import projectRouter from "./routes/project.route";
@@ -18,6 +19,8 @@ import mineRouter from "./routes/mine.route";
 import statsRouter from "./routes/stats.route";
 import adminRouter from "./routes/admin.route";
 import authRouter from "./routes/auth.route";
+import swapRouter from "./routes/swap.route";
+import transactionRouter from "./routes/transaction.route";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -80,6 +83,8 @@ app.use("/api/mine", mineRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/swap", swapRouter);
+app.use("/api/transaction", transactionRouter);
 
 
 let botRunning = false;
@@ -128,10 +133,26 @@ server.listen(port, async () => {
   console.log(`🚀 Server listening on port ${port}`);
   // Set up bot after server is ready
   await setupBot();
+  
+  // Start deposit listener
+  try {
+    await startDepositListener();
+    console.log("✅ Deposit listener started");
+  } catch (error) {
+    console.error("❌ Failed to start deposit listener:", error);
+  }
 });
 
 const gracefulShutdown = (signal: string) => {
   console.log(`Received ${signal}, shutting down gracefully...`);
+  
+  // Stop deposit listener
+  try {
+    stopDepositListener();
+    console.log("Deposit listener stopped");
+  } catch (error) {
+    console.error("Error stopping deposit listener:", error);
+  }
   
   // Only stop the bot if it's in polling mode
   if (botRunning && NODE_ENV !== "production") {

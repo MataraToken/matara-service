@@ -11,25 +11,11 @@ export const createProject = async (req: Request, res: Response) => {
     const { file } = req;
     
     // Enhanced logging for debugging
-    console.log("=== CREATE PROJECT REQUEST ===");
-    console.log("Request Body:", JSON.stringify(req.body, null, 2));
-    console.log("Request Body Keys:", Object.keys(req.body));
-    console.log("File:", file ? { 
-      fieldname: file.fieldname, 
-      originalname: file.originalname, 
-      mimetype: file.mimetype,
-      size: file.size 
-    } : "No file");
-    console.log("Content-Type:", req.headers["content-type"]);
-    console.log("================================");
+    
     
     const { name, description, socials, numberOfParticipants } = req.body;
 
     if (!name || !description || numberOfParticipants === undefined || numberOfParticipants === null) {
-      console.log("Validation failed - missing required fields");
-      console.log("Name:", name);
-      console.log("Description:", description);
-      console.log("numberOfParticipants:", numberOfParticipants);
       return res.status(400).json({
         message: "Name, description, and numberOfParticipants are required",
       });
@@ -39,17 +25,13 @@ export const createProject = async (req: Request, res: Response) => {
       ? parseInt(numberOfParticipants, 10) 
       : Number(numberOfParticipants);
 
-    console.log("Parsed numberOfParticipants:", participantsNum, "Type:", typeof participantsNum);
-
     if (isNaN(participantsNum) || participantsNum < 1) {
-      console.log("Invalid numberOfParticipants value:", numberOfParticipants);
       return res.status(400).json({
         message: "numberOfParticipants must be a number greater than 0",
       });
     }
 
     const slug = name.toLowerCase().split(" ").join("-");
-    console.log("Generated slug:", slug);
 
     const projectExists = await Project.findOne({ slug });
     if (projectExists) {
@@ -117,12 +99,26 @@ export const getProjects = async (req: Request, res: Response) => {
   try {
     const projects = await Project.find().lean().sort({ createdAt: -1 });
     
-    // Convert all ObjectIds to strings for consistent comparison
+    // Get task counts for each project
+    const projectIds = projects.map((p: any) => p._id);
+    const taskCounts = await Task.aggregate([
+      { $match: { projectId: { $in: projectIds } } },
+      { $group: { _id: "$projectId", count: { $sum: 1 } } },
+    ]);
+    
+    // Create a map of projectId to task count
+    const taskCountMap = new Map();
+    taskCounts.forEach((item: any) => {
+      taskCountMap.set(item._id.toString(), item.count);
+    });
+    
+    // Convert all ObjectIds to strings for consistent comparison and add task count
     const serializedProjects = projects.map((project: any) => ({
       ...project,
       _id: project._id.toString(),
       // joinedUsers now contains usernames (strings), no conversion needed
       joinedUsers: project.joinedUsers,
+      taskCount: taskCountMap.get(project._id.toString()) || 0,
     }));
     
     res.status(200).json({
@@ -354,9 +350,6 @@ export const joinProject = async (req: Request, res: Response) => {
   session.startTransaction();
 
   try {
-    console.log("=== JOIN PROJECT REQUEST ===");
-    console.log("Username:", username);
-    console.log("Project Slug:", slug);
     
     if (!username) {
       await session.abortTransaction();
@@ -390,10 +383,6 @@ export const joinProject = async (req: Request, res: Response) => {
     }
 
     const user = await User.findOne({ username }).session(session);
-    console.log("User found:", user ? {
-      username: user.username,
-      _id: user._id.toString()
-    } : "NOT FOUND");
     
     if (!user) {
       await session.abortTransaction();
@@ -413,13 +402,10 @@ export const joinProject = async (req: Request, res: Response) => {
 
     // Add username to joinedUsers array
     project.joinedUsers.push(username);
-    console.log("After adding user, joinedUsers count:", project.joinedUsers.length);
-    console.log("New joinedUsers:", project.joinedUsers);
 
     // Check if we've reached the participant limit
     if (project.joinedUsers.length >= project.numberOfParticipants) {
       project.status = "completed";
-      console.log("Project limit reached, setting status to completed");
     }
 
     await project.save({ session });
@@ -429,10 +415,6 @@ export const joinProject = async (req: Request, res: Response) => {
 
     // Verify the user was actually added - re-fetch to see what was actually saved
     const savedProject = await Project.findById(project._id);
-    console.log("Saved project joinedUsers:", savedProject?.joinedUsers);
-    console.log("Expected username:", username);
-    console.log("Actual saved usernames:", savedProject?.joinedUsers);
-    console.log("================================");
 
     // Ensure the response includes the correct username
     const responseData = {
