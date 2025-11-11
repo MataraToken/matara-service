@@ -43,6 +43,7 @@ const webhookPath = `/telegraf/${TELEGRAM_WEBHOOK_PATH}`;
 const allowedOrigins = [
   "https://matara-admin.vercel.app", // your frontend
   "http://localhost:5173",  
+  "http://localhost:5174",  
   "http://localhost:3000",  
   "https://matara-tma.vercel.app"         // local dev
 ];

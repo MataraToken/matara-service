@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Project from "../model/project.model";
 import Task from "../model/task.model";
 import User from "../model/user.model";
+import TaskSubmission from "../model/taskSubmission.model";
 import cloudinary from "../cloud";
 import mongoose from "mongoose";
 
@@ -137,6 +138,7 @@ export const getProjects = async (req: Request, res: Response) => {
 export const getProject = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
+    const { username } = req.query;
     const project = await Project.findOne({ slug });
     if (!project) {
       return res.status(404).json({ message: "Project not found" });
@@ -152,6 +154,58 @@ export const getProject = async (req: Request, res: Response) => {
       joinedUsersDetails = users;
     }
 
+    // If username is provided, fetch user's submission status for each task
+    let serializedTasks = tasks;
+    if (username) {
+      const user = await User.findOne({ username }).select("_id tasksCompleted").lean();
+      if (user) {
+        const completedTaskIds = new Set(user.tasksCompleted.map((id: any) => id.toString()));
+
+        // Get all task submissions for this user
+        const submissions = await TaskSubmission.find({ userId: user._id }).lean();
+        const submissionMap = new Map();
+        submissions.forEach((sub: any) => {
+          submissionMap.set(sub.taskId.toString(), {
+            status: sub.status,
+            proofUrl: sub.proofUrl,
+            reviewedBy: sub.reviewedBy,
+            reviewedAt: sub.reviewedAt,
+            rejectionReason: sub.rejectionReason,
+          });
+        });
+
+        // Add submission status to each task
+        serializedTasks = tasks.map((task: any) => {
+          const submission = submissionMap.get(task._id.toString());
+          return {
+            ...task,
+            _id: task._id.toString(),
+            projectId: task.projectId.toString(),
+            completed: completedTaskIds.has(task._id.toString()),
+            submissionStatus: submission?.status || "non-started",
+            proofUrl: submission?.proofUrl || null,
+            reviewedBy: submission?.reviewedBy || null,
+            reviewedAt: submission?.reviewedAt || null,
+            rejectionReason: submission?.rejectionReason || null,
+          };
+        });
+      } else {
+        // User not found, just serialize tasks without submission status
+        serializedTasks = tasks.map((task: any) => ({
+          ...task,
+          _id: task._id.toString(),
+          projectId: task.projectId.toString(),
+        }));
+      }
+    } else {
+      // If no username, just serialize the task IDs
+      serializedTasks = tasks.map((task: any) => ({
+        ...task,
+        _id: task._id.toString(),
+        projectId: task.projectId.toString(),
+      }));
+    }
+
     // Convert project to plain object and ensure all IDs are strings
     const projectObj = project.toObject();
     const serializedProject = {
@@ -160,13 +214,6 @@ export const getProject = async (req: Request, res: Response) => {
       joinedUsers: project.joinedUsers, // Now contains usernames (strings)
       joinedUsersDetails, // Populated user details
     };
-    
-    // Also serialize task IDs for consistency
-    const serializedTasks = tasks.map((task: any) => ({
-      ...task,
-      _id: task._id.toString(),
-      projectId: task.projectId.toString(),
-    }));
 
     res.status(200).json({ 
       data: {

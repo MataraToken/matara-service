@@ -311,10 +311,19 @@ export const getTaskSubmissionsForReview = async (req: Request, res: Response) =
   try {
     const { status } = req.query;
     
-    // Default to "reviewing" if no status provided
-    const queryStatus = status || "reviewing";
+    // Build query based on status param: "reviewing", "approved", or "all"
+    const query: any = {};
     
-    const query: any = { status: queryStatus };
+    if (status === "reviewing") {
+      query.status = "reviewing";
+    } else if (status === "approved") {
+      query.status = "complete";
+    } else if (status === "all") {
+      // No status filter - get all submissions
+    } else {
+      // Default to "reviewing" if no status provided or invalid status
+      query.status = "reviewing";
+    }
     
     const submissions = await TaskSubmission.find(query)
       .populate("userId", "username profilePicture")
@@ -323,10 +332,17 @@ export const getTaskSubmissionsForReview = async (req: Request, res: Response) =
       .lean();
 
     const serializedSubmissions = submissions.map((submission: any) => ({
-      ...submission,
       _id: submission._id.toString(),
       userId: submission.userId._id.toString(),
       taskId: submission.taskId._id.toString(),
+      username: submission.username,
+      proofUrl: submission.proofUrl,
+      status: submission.status,
+      reviewedBy: submission.reviewedBy,
+      reviewedAt: submission.reviewedAt,
+      rejectionReason: submission.rejectionReason,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
       user: {
         _id: submission.userId._id.toString(),
         username: submission.userId.username,

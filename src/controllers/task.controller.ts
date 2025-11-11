@@ -81,6 +81,7 @@ export const getTask = async (req: Request, res: Response) => {
 export const getTasksByProjectId = async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
+    const { username } = req.query;
 
     // Validate projectId format
     if (!mongoose.Types.ObjectId.isValid(projectId)) {
@@ -96,8 +97,51 @@ export const getTasksByProjectId = async (req: Request, res: Response) => {
     // Fetch all tasks under this project
     const tasks = await Task.find({ projectId }).populate("projectId", "name slug description logo socials status numberOfParticipants joinedUsers").lean();
 
+    // If username is provided, fetch user's submission status for each task
+    let tasksWithSubmissionStatus = tasks;
+    if (username) {
+      const user = await User.findOne({ username }).select("_id tasksCompleted").lean();
+      if (user) {
+        const completedTaskIds = new Set(user.tasksCompleted.map((id: any) => id.toString()));
+
+        // Get all task submissions for this user
+        const submissions = await TaskSubmission.find({ userId: user._id }).lean();
+        const submissionMap = new Map();
+        submissions.forEach((sub: any) => {
+          submissionMap.set(sub.taskId.toString(), {
+            status: sub.status,
+            proofUrl: sub.proofUrl,
+            reviewedBy: sub.reviewedBy,
+            reviewedAt: sub.reviewedAt,
+            rejectionReason: sub.rejectionReason,
+          });
+        });
+
+        // Add submission status to each task
+        tasksWithSubmissionStatus = tasks.map((task: any) => {
+          const submission = submissionMap.get(task._id.toString());
+          return {
+            ...task,
+            _id: task._id.toString(),
+            completed: completedTaskIds.has(task._id.toString()),
+            submissionStatus: submission?.status || "non-started",
+            proofUrl: submission?.proofUrl,
+            reviewedBy: submission?.reviewedBy,
+            reviewedAt: submission?.reviewedAt,
+            rejectionReason: submission?.rejectionReason,
+          };
+        });
+      }
+    } else {
+      // If no username, just serialize the task IDs
+      tasksWithSubmissionStatus = tasks.map((task: any) => ({
+        ...task,
+        _id: task._id.toString(),
+      }));
+    }
+
     res.status(200).json({
-      data: tasks,
+      data: tasksWithSubmissionStatus,
       project: {
         _id: project._id,
         name: project.name,
