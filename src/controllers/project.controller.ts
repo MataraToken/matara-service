@@ -5,6 +5,8 @@ import User from "../model/user.model";
 import TaskSubmission from "../model/taskSubmission.model";
 import cloudinary from "../cloud";
 import mongoose from "mongoose";
+import { compressLogo } from "../utils/imageCompression";
+import fs from "fs/promises";
 
 export const createProject = async (req: Request, res: Response) => {
   try {
@@ -51,13 +53,33 @@ export const createProject = async (req: Request, res: Response) => {
 
     // Handle logo upload
     if (file) {
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path,
-        {
-          folder: "matara-projects",
+      let compressedPath = file.path;
+      try {
+        // Compress image before upload
+        compressedPath = await compressLogo(file.path);
+      } catch (error) {
+        console.error("Error compressing logo:", error);
+        // Continue with original file if compression fails
+      }
+
+      try {
+        const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+          compressedPath,
+          {
+            folder: "matara-projects",
+          }
+        );
+        project.logo = { url, public_id };
+      } finally {
+        // Clean up compressed file if it's different from original
+        if (compressedPath !== file.path) {
+          try {
+            await fs.unlink(compressedPath);
+          } catch (error) {
+            console.error("Error deleting compressed file:", error);
+          }
         }
-      );
-      project.logo = { url, public_id };
+      }
     }
 
     // Handle socials (expecting JSON array with platform, url, and optional icon URL)
@@ -241,13 +263,34 @@ export const updateProject = async (req: Request, res: Response) => {
       if (project.logo?.public_id) {
         await cloudinary.uploader.destroy(project.logo.public_id);
       }
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path,
-        {
-          folder: "matara-projects",
+      
+      let compressedPath = file.path;
+      try {
+        // Compress image before upload
+        compressedPath = await compressLogo(file.path);
+      } catch (error) {
+        console.error("Error compressing logo:", error);
+        // Continue with original file if compression fails
+      }
+
+      try {
+        const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+          compressedPath,
+          {
+            folder: "matara-projects",
+          }
+        );
+        project.logo = { url, public_id };
+      } finally {
+        // Clean up compressed file if it's different from original
+        if (compressedPath !== file.path) {
+          try {
+            await fs.unlink(compressedPath);
+          } catch (error) {
+            console.error("Error deleting compressed file:", error);
+          }
         }
-      );
-      project.logo = { url, public_id };
+      }
     }
 
     if (name) {

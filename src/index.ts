@@ -21,6 +21,7 @@ import adminRouter from "./routes/admin.route";
 import authRouter from "./routes/auth.route";
 import swapRouter from "./routes/swap.route";
 import transactionRouter from "./routes/transaction.route";
+import transferRouter from "./routes/transfer.route";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -64,7 +65,9 @@ app.use(
 // Handle all OPTIONS requests
 app.options("*", cors());
 
-app.use(express.json());
+// Increase body size limits for file uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(morgan("dev"));
 
 app.get('/', (req, res) => {
@@ -85,6 +88,7 @@ app.use("/api/admin", adminRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/swap", swapRouter);
 app.use("/api/transaction", transactionRouter);
+app.use("/api/transfer", transferRouter);
 
 
 let botRunning = false;

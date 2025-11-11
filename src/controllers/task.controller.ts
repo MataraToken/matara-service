@@ -6,6 +6,8 @@ import TaskSubmission from "../model/taskSubmission.model";
 import cloudinary from "../cloud";
 import mongoose from "mongoose";
 import Point from "../model/points.model";
+import { compressLogo } from "../utils/imageCompression";
+import fs from "fs/promises";
 
 
 export const getUserTasks = async (req: Request, res: Response) => {
@@ -173,10 +175,31 @@ export const updateTask = async (req: Request, res: Response) => {
       if (task.icon?.public_id) {
         await cloudinary.uploader.destroy(task.icon.public_id);
       }
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path
-      );
-      task.icon = { url, public_id };
+      
+      let compressedPath = file.path;
+      try {
+        // Compress image before upload
+        compressedPath = await compressLogo(file.path);
+      } catch (error) {
+        console.error("Error compressing task icon:", error);
+        // Continue with original file if compression fails
+      }
+
+      try {
+        const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+          compressedPath
+        );
+        task.icon = { url, public_id };
+      } finally {
+        // Clean up compressed file if it's different from original
+        if (compressedPath !== file.path) {
+          try {
+            await fs.unlink(compressedPath);
+          } catch (error) {
+            console.error("Error deleting compressed file:", error);
+          }
+        }
+      }
     }
 
     task.title = title ?? task.title;

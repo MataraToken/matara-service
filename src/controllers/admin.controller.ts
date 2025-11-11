@@ -8,6 +8,8 @@ import cloudinary from "../cloud";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
+import { compressLogo } from "../utils/imageCompression";
+import fs from "fs/promises";
 
 export const registerAdmin = async (req: Request, res: Response) => {
   const { username, password, firstName } = req.body;
@@ -135,13 +137,33 @@ export const createTask = async (req: Request, res: Response) => {
     const task = new Task({ title, slug, description, points, link, projectId });
 
     if (file) {
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path,
-        {
-          folder: "matara-tasks",
+      let compressedPath = file.path;
+      try {
+        // Compress image before upload
+        compressedPath = await compressLogo(file.path);
+      } catch (error) {
+        console.error("Error compressing task icon:", error);
+        // Continue with original file if compression fails
+      }
+
+      try {
+        const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+          compressedPath,
+          {
+            folder: "matara-tasks",
+          }
+        );
+        task.icon = { url, public_id };
+      } finally {
+        // Clean up compressed file if it's different from original
+        if (compressedPath !== file.path) {
+          try {
+            await fs.unlink(compressedPath);
+          } catch (error) {
+            console.error("Error deleting compressed file:", error);
+          }
         }
-      );
-      task.icon = { url, public_id };
+      }
     }
 
     await task.save();
@@ -285,10 +307,31 @@ export const updateTask = async (req: Request, res: Response) => {
       if (task.icon?.public_id) {
         await cloudinary.uploader.destroy(task.icon.public_id);
       }
-      const { secure_url: url, public_id } = await cloudinary.uploader.upload(
-        file.path
-      );
-      task.icon = { url, public_id };
+      
+      let compressedPath = file.path;
+      try {
+        // Compress image before upload
+        compressedPath = await compressLogo(file.path);
+      } catch (error) {
+        console.error("Error compressing task icon:", error);
+        // Continue with original file if compression fails
+      }
+
+      try {
+        const { secure_url: url, public_id } = await cloudinary.uploader.upload(
+          compressedPath
+        );
+        task.icon = { url, public_id };
+      } finally {
+        // Clean up compressed file if it's different from original
+        if (compressedPath !== file.path) {
+          try {
+            await fs.unlink(compressedPath);
+          } catch (error) {
+            console.error("Error deleting compressed file:", error);
+          }
+        }
+      }
     }
 
     task.title = title ?? task.title;
