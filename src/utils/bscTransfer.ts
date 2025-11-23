@@ -183,6 +183,116 @@ async function checkTokenBalance(
 /**
  * Execute BSC token transfer
  */
+// export async function executeBSCTokenTransfer(params: TransferParams): Promise<TransferResult> {
+//   try {
+//     const {
+//       tokenAddress,
+//       toAddress,
+//       amount,
+//       fromWalletAddress,
+//       encryptedPrivateKey,
+//     } = params;
+
+
+//     const provider = getBSCProvider();
+//     const signer = getWalletSigner(encryptedPrivateKey, fromWalletAddress);
+
+//     // Verify wallet address matches
+//     if (signer.address.toLowerCase() !== fromWalletAddress.toLowerCase()) {
+//       throw new Error('Wallet address mismatch');
+//     }
+
+//     // Validate recipient address
+//     if (!ethers.isAddress(toAddress)) {
+//       throw new Error('Invalid recipient address');
+//     }
+
+//     const isNativeBNB = tokenAddress.toLowerCase() === ethers.ZeroAddress.toLowerCase() ||
+//                         tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+//     // Get token decimals
+//     const decimals = await getTokenDecimals(tokenAddress, provider);
+//     const amountWei = parseTokenAmount(amount, decimals);
+
+//     // Check token balance
+//     const balanceCheck = await checkTokenBalance(tokenAddress, fromWalletAddress, amountWei, provider);
+//     if (!balanceCheck.sufficient) {
+//       return {
+//         success: false,
+//         error: balanceCheck.error || 'Insufficient token balance',
+//       };
+//     }
+
+//     // Estimate gas for transfer
+//     let estimatedGas: bigint | undefined;
+//     try {
+//       if (isNativeBNB) {
+//         // For native BNB transfer
+//         estimatedGas = await provider.estimateGas({
+//           to: toAddress,
+//           value: amountWei,
+//           from: fromWalletAddress,
+//         });
+//       } else {
+//         // For ERC20 token transfer
+//         const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+//         estimatedGas = await tokenContract.transfer.estimateGas(toAddress, amountWei);
+//       }
+//     } catch (gasError) {
+//       console.warn('Gas estimation failed, proceeding with balance check only:', gasError);
+//     }
+
+//     // Check gas balance
+//     const gasCheck = await checkGasBalance(signer, estimatedGas);
+//     if (!gasCheck.sufficient) {
+//       return {
+//         success: false,
+//         error: gasCheck.error || 'Insufficient BNB for gas fees',
+//       };
+//     }
+
+//     // Execute transfer
+//     let receipt: ethers.TransactionReceipt | null = null;
+    
+//     if (isNativeBNB) {
+//       // Native BNB transfer
+//       const tx = await signer.sendTransaction({
+//         to: toAddress,
+//         value: amountWei,
+//       });
+//       receipt = await tx.wait();
+//     } else {
+//       // ERC20 token transfer
+//       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+//       const tx = await tokenContract.transfer(toAddress, amountWei);
+//       const contractReceipt = await tx.wait();
+//       // ContractTransactionReceipt extends TransactionReceipt, so we can use it
+//       receipt = contractReceipt;
+//     }
+
+//     if (!receipt) {
+//       throw new Error('Transaction receipt not found');
+//     }
+
+//     const gasFee = receipt.gasUsed * (receipt.gasPrice || BigInt(0));
+//     const gasFeeBNB = ethers.formatEther(gasFee);
+
+//     return {
+//       success: true,
+//       transactionHash: receipt.hash,
+//       gasUsed: receipt.gasUsed.toString(),
+//       gasFee: gasFeeBNB,
+//     };
+//   } catch (error) {
+//     console.error('Error executing BSC token transfer:', error);
+//     return {
+//       success: false,
+//       error: error instanceof Error ? error.message : 'Unknown error occurred',
+//     };
+//   }
+// }
+
+
 export async function executeBSCTokenTransfer(params: TransferParams): Promise<TransferResult> {
   try {
     const {
@@ -196,82 +306,110 @@ export async function executeBSCTokenTransfer(params: TransferParams): Promise<T
     const provider = getBSCProvider();
     const signer = getWalletSigner(encryptedPrivateKey, fromWalletAddress);
 
-    // Verify wallet address matches
+    // Validate signer
     if (signer.address.toLowerCase() !== fromWalletAddress.toLowerCase()) {
       throw new Error('Wallet address mismatch');
     }
 
-    // Validate recipient address
     if (!ethers.isAddress(toAddress)) {
       throw new Error('Invalid recipient address');
     }
 
-    const isNativeBNB = tokenAddress.toLowerCase() === ethers.ZeroAddress.toLowerCase() ||
-                        tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    //------------------------------------------------------------
+    // 1. CHECK NATIVE OR ERC20
+    //------------------------------------------------------------
 
-    // Get token decimals
-    const decimals = await getTokenDecimals(tokenAddress, provider);
-    const amountWei = parseTokenAmount(amount, decimals);
+    const isNativeBNB =
+      tokenAddress.toLowerCase() === "native" ||
+      tokenAddress.toLowerCase() === ethers.ZeroAddress.toLowerCase() ||
+      tokenAddress.toLowerCase() === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-    // Check token balance
-    const balanceCheck = await checkTokenBalance(tokenAddress, fromWalletAddress, amountWei, provider);
-    if (!balanceCheck.sufficient) {
-      return {
-        success: false,
-        error: balanceCheck.error || 'Insufficient token balance',
-      };
+    //------------------------------------------------------------
+    // 2. DETERMINE AMOUNT IN WEI
+    //------------------------------------------------------------
+
+    let amountWei: bigint;
+
+    if (isNativeBNB) {
+      amountWei = ethers.parseEther(amount.toString());
+    } else {
+      const decimals = await getTokenDecimals(tokenAddress, provider);
+      amountWei = parseTokenAmount(amount, decimals);
     }
 
-    // Estimate gas for transfer
+    //------------------------------------------------------------
+    // 3. BALANCE CHECK
+    //------------------------------------------------------------
+
+    if (isNativeBNB) {
+      // Check BNB balance directly
+      const balance = await provider.getBalance(fromWalletAddress);
+      if (balance < amountWei) {
+        return { success: false, error: "Insufficient BNB balance" };
+      }
+    } else {
+      // ERC20 balance
+      const balanceCheck = await checkTokenBalance(tokenAddress, fromWalletAddress, amountWei, provider);
+      if (!balanceCheck.sufficient) {
+        return {
+          success: false,
+          error: balanceCheck.error || "Insufficient token balance",
+        };
+      }
+    }
+
+    //------------------------------------------------------------
+    // 4. GAS ESTIMATION
+    //------------------------------------------------------------
+
     let estimatedGas: bigint | undefined;
+
     try {
       if (isNativeBNB) {
-        // For native BNB transfer
         estimatedGas = await provider.estimateGas({
           to: toAddress,
           value: amountWei,
           from: fromWalletAddress,
         });
       } else {
-        // For ERC20 token transfer
         const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
         estimatedGas = await tokenContract.transfer.estimateGas(toAddress, amountWei);
       }
-    } catch (gasError) {
-      console.warn('Gas estimation failed, proceeding with balance check only:', gasError);
+    } catch (err) {
+      console.warn("Gas estimation failed:", err);
+      // continue — you may still have enough gas
     }
 
-    // Check gas balance
+    //------------------------------------------------------------
+    // 5. CHECK GAS BALANCE
+    //------------------------------------------------------------
+
     const gasCheck = await checkGasBalance(signer, estimatedGas);
     if (!gasCheck.sufficient) {
-      return {
-        success: false,
-        error: gasCheck.error || 'Insufficient BNB for gas fees',
-      };
+      return { success: false, error: gasCheck.error || "Insufficient BNB for gas fees" };
     }
 
-    // Execute transfer
-    let receipt: ethers.TransactionReceipt | null = null;
-    
+    //------------------------------------------------------------
+    // 6. EXECUTE TRANSFER
+    //------------------------------------------------------------
+
+    let receipt: ethers.TransactionReceipt;
+
     if (isNativeBNB) {
-      // Native BNB transfer
       const tx = await signer.sendTransaction({
         to: toAddress,
         value: amountWei,
       });
       receipt = await tx.wait();
     } else {
-      // ERC20 token transfer
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
       const tx = await tokenContract.transfer(toAddress, amountWei);
-      const contractReceipt = await tx.wait();
-      // ContractTransactionReceipt extends TransactionReceipt, so we can use it
-      receipt = contractReceipt;
+      receipt = await tx.wait();
     }
 
-    if (!receipt) {
-      throw new Error('Transaction receipt not found');
-    }
+    //------------------------------------------------------------
+    // 7. FINISH
+    //------------------------------------------------------------
 
     const gasFee = receipt.gasUsed * (receipt.gasPrice || BigInt(0));
     const gasFeeBNB = ethers.formatEther(gasFee);
@@ -282,11 +420,12 @@ export async function executeBSCTokenTransfer(params: TransferParams): Promise<T
       gasUsed: receipt.gasUsed.toString(),
       gasFee: gasFeeBNB,
     };
+
   } catch (error) {
-    console.error('Error executing BSC token transfer:', error);
+    console.error("Error executing BSC token transfer:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
