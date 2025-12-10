@@ -87,8 +87,16 @@ async function ensureTokenApproval(
     const maxApproval = typeof ethers.MaxUint256 !== 'undefined' 
       ? ethers.MaxUint256 
       : BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+    
+    console.log(`Approving token ${tokenAddress} for spender ${spenderAddress}, amount needed: ${amount.toString()}`);
     const approveTx = await tokenContract.approve(spenderAddress, maxApproval);
-    await approveTx.wait();
+    
+    // Wait for transaction to be mined (at least 1 confirmation)
+    const receipt = await approveTx.wait();
+    console.log(`Token approval transaction confirmed: ${receipt.hash}, block: ${receipt.blockNumber}`);
+    
+    // Wait additional time for state to propagate (BSC can be fast but state updates need time)
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     return true;
   } catch (error) {
@@ -479,34 +487,48 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
         throw new Error('Token approval failed');
       }
 
-      // Double-check approval was successful and wait a bit for it to be processed
-      try {
-        const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, provider);
-        
-        // Wait a moment for approval to be processed (some tokens need a block confirmation)
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const finalAllowance = await tokenContract.allowance(walletAddress, PANCAKESWAP_ROUTER_V2);
-        const finalBalance = await tokenContract.balanceOf(walletAddress);
-        
-        if (finalAllowance < amountInWei) {
-          return {
-            success: false,
-            error: `Token approval insufficient. Allowance: ${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Required: ${ethers.formatUnits(amountInWei, tokenInDecimals)}`,
-          };
+      // Verify approval and balance with retries (blockchain state may take time to update)
+      const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, provider);
+      let finalAllowance: bigint;
+      let finalBalance: bigint;
+      let approvalVerified = false;
+      const maxRetries = 5;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          // Wait for block confirmation (BSC blocks are ~3 seconds)
+          if (attempt > 0) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+          
+          finalAllowance = await tokenContract.allowance(walletAddress, PANCAKESWAP_ROUTER_V2);
+          finalBalance = await tokenContract.balanceOf(walletAddress);
+          
+          if (finalAllowance >= amountInWei && finalBalance >= amountInWei) {
+            approvalVerified = true;
+            console.log(`Approval verified (attempt ${attempt + 1}): Allowance=${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Balance=${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required=${ethers.formatUnits(amountInWei, tokenInDecimals)}`);
+            break;
+          } else {
+            console.warn(`Approval check attempt ${attempt + 1}: Allowance=${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Balance=${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required=${ethers.formatUnits(amountInWei, tokenInDecimals)}`);
+          }
+        } catch (checkError) {
+          console.warn(`Error checking approval/balance (attempt ${attempt + 1}):`, checkError);
+          if (attempt === maxRetries - 1) {
+            return {
+              success: false,
+              error: `Could not verify token approval/balance after ${maxRetries} attempts: ${checkError instanceof Error ? checkError.message : 'Unknown error'}`,
+            };
+          }
         }
-        
-        if (finalBalance < amountInWei) {
-          return {
-            success: false,
-            error: `Insufficient token balance. Balance: ${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required: ${ethers.formatUnits(amountInWei, tokenInDecimals)}`,
-          };
-        }
-        
-        console.log(`Approval verified: Allowance=${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Balance=${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required=${ethers.formatUnits(amountInWei, tokenInDecimals)}`);
-      } catch (allowanceError) {
-        console.warn('Could not verify final allowance/balance:', allowanceError);
-        // Continue anyway - the swap will fail on-chain if insufficient
+      }
+      
+      if (!approvalVerified) {
+        const allowanceStr = finalAllowance ? ethers.formatUnits(finalAllowance, tokenInDecimals) : 'unknown';
+        const balanceStr = finalBalance ? ethers.formatUnits(finalBalance, tokenInDecimals) : 'unknown';
+        return {
+          success: false,
+          error: `Token approval or balance insufficient after ${maxRetries} verification attempts. Allowance: ${allowanceStr}, Balance: ${balanceStr}, Required: ${ethers.formatUnits(amountInWei, tokenInDecimals)}`,
+        };
       }
     }
 
