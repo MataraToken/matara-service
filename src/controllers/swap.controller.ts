@@ -156,6 +156,7 @@ export const createSwapRequest = async (req: Request, res: Response) => {
         slippageTolerance: swapRequest.slippageTolerance,
         deadline: swapRequest.deadline,
         feeRecipientAddress: swapRequest.feeRecipientAddress,
+        feeAmount: swapRequest.feeAmount, // Pass fee amount for collection
       });
 
       // Update swap request with transaction result

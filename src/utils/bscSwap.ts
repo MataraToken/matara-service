@@ -37,6 +37,7 @@ interface SwapParams {
   slippageTolerance: number;
   deadline: number;
   feeRecipientAddress?: string;
+  feeAmount?: string; // Fee amount to deduct and transfer
 }
 
 interface SwapResult {
@@ -138,8 +139,13 @@ async function checkGasBalance(
     const balance = await signer.provider.getBalance(signer.address);
     const balanceBN = ethers.formatEther(balance);
     
-    // Default minimum gas requirement (0.01 BNB) or use estimated cost
-    const minGasRequired = estimatedGasCost || ethers.parseEther('0.01');
+    // Get minimum gas requirement from env or use reasonable default (0.001 BNB for BSC)
+    // BSC gas fees are typically much lower than Ethereum
+    const defaultMinGas = process.env.MIN_GAS_RESERVE_BNB 
+      ? ethers.parseEther(process.env.MIN_GAS_RESERVE_BNB)
+      : ethers.parseEther('0.001'); // 0.001 BNB is more reasonable for BSC
+    
+    const minGasRequired = estimatedGasCost || defaultMinGas;
     const minGasRequiredBN = ethers.formatEther(minGasRequired);
     
     const sufficient = balance >= minGasRequired;
@@ -184,8 +190,11 @@ async function estimateSwapGas(
     return gasCost;
   } catch (error) {
     console.warn('Could not estimate gas, using default:', error);
-    // Return a conservative estimate (0.01 BNB) if estimation fails
-    return ethers.parseEther('0.01');
+    // Return a conservative estimate (0.001 BNB for BSC) if estimation fails
+    const defaultGasReserve = process.env.MIN_GAS_RESERVE_BNB 
+      ? ethers.parseEther(process.env.MIN_GAS_RESERVE_BNB)
+      : ethers.parseEther('0.001');
+    return defaultGasReserve;
   }
 }
 
@@ -203,6 +212,8 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       encryptedPrivateKey,
       slippageTolerance,
       deadline,
+      feeRecipientAddress,
+      feeAmount,
     } = params;
 
     const provider = getBSCProvider();
@@ -222,15 +233,43 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       };
     }
 
-    // Check token balance if swapping tokens (not BNB)
+    // Determine if input is BNB
     const isTokenInBNB = tokenIn.toLowerCase() === WBNB_ADDRESS.toLowerCase() || 
                          tokenIn.toLowerCase() === ethers.ZeroAddress.toLowerCase() ||
                          tokenIn.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
     
+    // Calculate actual swap amount (amountIn - feeAmount) if fee is specified
+    let actualSwapAmount = amountIn;
+    let feeAmountWei: bigint | undefined;
+    
+    if (feeAmount && feeRecipientAddress && parseFloat(feeAmount) > 0) {
+      const feeAmountNum = parseFloat(feeAmount);
+      const amountInNum = parseFloat(amountIn);
+      
+      if (feeAmountNum >= amountInNum) {
+        return {
+          success: false,
+          error: 'Fee amount cannot be greater than or equal to swap amount',
+        };
+      }
+      
+      // Calculate actual swap amount (amountIn - fee)
+      actualSwapAmount = (amountInNum - feeAmountNum).toFixed(18);
+      
+      // Convert fee amount to wei
+      if (isTokenInBNB) {
+        feeAmountWei = parseTokenAmount(feeAmount, 18);
+      } else {
+        const tokenInDecimals = await getTokenDecimals(tokenIn, provider);
+        feeAmountWei = parseTokenAmount(feeAmount, tokenInDecimals);
+      }
+    }
+
+    // Check token balance if swapping tokens (not BNB)
     if (!isTokenInBNB) {
       try {
         const tokenInDecimals = await getTokenDecimals(tokenIn, provider);
-        const amountInWei = parseTokenAmount(amountIn, tokenInDecimals);
+        const amountInWei = parseTokenAmount(amountIn, tokenInDecimals); // Check full amount including fee
         
         const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, provider);
         const balance = await tokenContract.balanceOf(walletAddress);
@@ -251,10 +290,12 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       try {
         const balance = await provider.getBalance(walletAddress);
         const tokenInDecimals = 18;
-        const amountInWei = parseTokenAmount(amountIn, tokenInDecimals);
+        const amountInWei = parseTokenAmount(amountIn, tokenInDecimals); // Check full amount including fee
         
-        // Reserve some BNB for gas (0.01 BNB)
-        const gasReserve = ethers.parseEther('0.01');
+        // Reserve some BNB for gas (configurable, default 0.001 BNB for BSC)
+        const gasReserve = process.env.MIN_GAS_RESERVE_BNB 
+          ? ethers.parseEther(process.env.MIN_GAS_RESERVE_BNB)
+          : ethers.parseEther('0.001');
         const availableBalance = balance > gasReserve ? balance - gasReserve : BigInt(0);
         
         if (availableBalance < amountInWei) {
@@ -267,6 +308,70 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
         }
       } catch (balanceError) {
         console.warn('Could not check BNB balance:', balanceError);
+      }
+    }
+
+    // Transfer fee to recipient if specified
+    if (feeAmountWei && feeRecipientAddress && feeRecipientAddress.trim() !== '') {
+      // Validate fee recipient address
+      if (!ethers.isAddress(feeRecipientAddress)) {
+        return {
+          success: false,
+          error: `Invalid fee recipient address: ${feeRecipientAddress}`,
+        };
+      }
+
+      // Ensure fee recipient is not the same as wallet address (to avoid unnecessary transfers)
+      if (feeRecipientAddress.toLowerCase() === walletAddress.toLowerCase()) {
+        console.warn('Fee recipient address is the same as wallet address, skipping fee transfer');
+      } else {
+        try {
+          if (isTokenInBNB) {
+            // Transfer BNB fee
+            // Check if we have enough BNB for fee + gas
+            const balance = await provider.getBalance(walletAddress);
+            const gasReserve = process.env.MIN_GAS_RESERVE_BNB 
+              ? ethers.parseEther(process.env.MIN_GAS_RESERVE_BNB)
+              : ethers.parseEther('0.001');
+            if (balance < feeAmountWei + gasReserve) {
+              return {
+                success: false,
+                error: `Insufficient BNB for fee transfer. Required: ${ethers.formatEther(feeAmountWei + gasReserve)} BNB`,
+              };
+            }
+
+            const feeTx = await signer.sendTransaction({
+              to: feeRecipientAddress,
+              value: feeAmountWei,
+            });
+            const feeReceipt = await feeTx.wait();
+            console.log(`Fee of ${ethers.formatEther(feeAmountWei)} BNB transferred to ${feeRecipientAddress} in tx ${feeReceipt.hash}`);
+          } else {
+            // Transfer token fee
+            const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, signer);
+            
+            // Check token balance for fee
+            const balance = await tokenContract.balanceOf(walletAddress);
+            if (balance < feeAmountWei) {
+              return {
+                success: false,
+                error: `Insufficient token balance for fee transfer`,
+              };
+            }
+
+            // Transfer fee directly (we own the tokens, no approval needed)
+            const feeTx = await tokenContract.transfer(feeRecipientAddress, feeAmountWei);
+            const feeReceipt = await feeTx.wait();
+            const tokenDecimals = await getTokenDecimals(tokenIn, provider);
+            console.log(`Fee of ${ethers.formatUnits(feeAmountWei, tokenDecimals)} ${tokenIn} transferred to ${feeRecipientAddress} in tx ${feeReceipt.hash}`);
+          }
+        } catch (feeError) {
+          console.error('Error transferring fee:', feeError);
+          return {
+            success: false,
+            error: `Failed to transfer fee: ${feeError instanceof Error ? feeError.message : 'Unknown error'}`,
+          };
+        }
       }
     }
 
@@ -306,7 +411,7 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
 
     // Get token decimals
     const tokenInDecimals = isTokenInBNB ? 18 : await getTokenDecimals(tokenIn, provider);
-    const amountInWei = parseTokenAmount(amountIn, tokenInDecimals);
+    const amountInWei = parseTokenAmount(actualSwapAmount, tokenInDecimals); // Use actual swap amount (after fee deduction)
     const amountOutMinWei = amountOutMin 
       ? parseTokenAmount(amountOutMin, await getTokenDecimals(tokenOut, provider))
       : BigInt(0);
