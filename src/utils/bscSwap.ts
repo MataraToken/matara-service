@@ -445,6 +445,25 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
 
     // Handle token approval if not BNB
     if (!isTokenInBNB) {
+      // Verify balance after fee transfer (if fee was transferred)
+      // This ensures we have enough tokens for the swap
+      try {
+        const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, provider);
+        const currentBalance = await tokenContract.balanceOf(walletAddress);
+        
+        if (currentBalance < amountInWei) {
+          const balanceFormatted = ethers.formatUnits(currentBalance, tokenInDecimals);
+          const requiredFormatted = ethers.formatUnits(amountInWei, tokenInDecimals);
+          return {
+            success: false,
+            error: `Insufficient token balance after fee transfer. Balance: ${balanceFormatted}, Required: ${requiredFormatted}`,
+          };
+        }
+      } catch (balanceError) {
+        console.warn('Could not verify balance after fee transfer:', balanceError);
+        // Continue anyway - the swap will fail on-chain if insufficient
+      }
+
       // Check gas balance before approval (approval also costs gas)
       const approvalGasCheck = await checkGasBalance(signer);
       if (!approvalGasCheck.sufficient) {
@@ -454,9 +473,40 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
         };
       }
 
+      // Approve the router to spend the exact amount needed (or check if already approved)
       const approved = await ensureTokenApproval(tokenIn, PANCAKESWAP_ROUTER_V2, amountInWei, signer);
       if (!approved) {
         throw new Error('Token approval failed');
+      }
+
+      // Double-check approval was successful and wait a bit for it to be processed
+      try {
+        const tokenContract = new ethers.Contract(tokenIn, ERC20_ABI, provider);
+        
+        // Wait a moment for approval to be processed (some tokens need a block confirmation)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const finalAllowance = await tokenContract.allowance(walletAddress, PANCAKESWAP_ROUTER_V2);
+        const finalBalance = await tokenContract.balanceOf(walletAddress);
+        
+        if (finalAllowance < amountInWei) {
+          return {
+            success: false,
+            error: `Token approval insufficient. Allowance: ${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Required: ${ethers.formatUnits(amountInWei, tokenInDecimals)}`,
+          };
+        }
+        
+        if (finalBalance < amountInWei) {
+          return {
+            success: false,
+            error: `Insufficient token balance. Balance: ${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required: ${ethers.formatUnits(amountInWei, tokenInDecimals)}`,
+          };
+        }
+        
+        console.log(`Approval verified: Allowance=${ethers.formatUnits(finalAllowance, tokenInDecimals)}, Balance=${ethers.formatUnits(finalBalance, tokenInDecimals)}, Required=${ethers.formatUnits(amountInWei, tokenInDecimals)}`);
+      } catch (allowanceError) {
+        console.warn('Could not verify final allowance/balance:', allowanceError);
+        // Continue anyway - the swap will fail on-chain if insufficient
       }
     }
 
