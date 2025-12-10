@@ -295,7 +295,7 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
         // Reserve some BNB for gas (configurable, default 0.001 BNB for BSC)
         const gasReserve = process.env.MIN_GAS_RESERVE_BNB 
           ? ethers.parseEther(process.env.MIN_GAS_RESERVE_BNB)
-          : ethers.parseEther('0.001');
+          : ethers.parseEther('0.0001');
         const availableBalance = balance > gasReserve ? balance - gasReserve : BigInt(0);
         
         if (availableBalance < amountInWei) {
@@ -411,10 +411,37 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
 
     // Get token decimals
     const tokenInDecimals = isTokenInBNB ? 18 : await getTokenDecimals(tokenIn, provider);
+    const tokenOutDecimals = isTokenOutBNB ? 18 : await getTokenDecimals(tokenOut, provider);
     const amountInWei = parseTokenAmount(actualSwapAmount, tokenInDecimals); // Use actual swap amount (after fee deduction)
-    const amountOutMinWei = amountOutMin 
-      ? parseTokenAmount(amountOutMin, await getTokenDecimals(tokenOut, provider))
-      : BigInt(0);
+    
+    // Recalculate amountOutMin based on actual swap amount if fee was deducted
+    // This ensures the minimum output matches what we'll actually get
+    let amountOutMinWei: bigint;
+    if (amountOutMin && parseFloat(amountOutMin) > 0) {
+      // If amountOutMin was provided, we need to adjust it proportionally
+      // since the actual swap amount is less than the original amountIn
+      if (actualSwapAmount !== amountIn && parseFloat(amountIn) > 0) {
+        // Calculate the ratio of actual swap amount to original amount
+        const swapRatio = parseFloat(actualSwapAmount) / parseFloat(amountIn);
+        // Adjust amountOutMin proportionally
+        const adjustedAmountOutMin = (parseFloat(amountOutMin) * swapRatio).toFixed(18);
+        amountOutMinWei = parseTokenAmount(adjustedAmountOutMin, tokenOutDecimals);
+      } else {
+        amountOutMinWei = parseTokenAmount(amountOutMin, tokenOutDecimals);
+      }
+    } else {
+      // If no amountOutMin provided, get a fresh quote for the actual swap amount
+      // and apply slippage tolerance
+      try {
+        const quote = await getSwapQuote(tokenIn, tokenOut, actualSwapAmount);
+        const quoteAmountOut = parseFloat(quote.amountOut);
+        const slippageAdjusted = (quoteAmountOut * (100 - slippageTolerance) / 100).toFixed(18);
+        amountOutMinWei = parseTokenAmount(slippageAdjusted, tokenOutDecimals);
+      } catch (quoteError) {
+        console.warn('Could not get quote for actual swap amount, using zero minimum:', quoteError);
+        amountOutMinWei = BigInt(0);
+      }
+    }
 
     // Handle token approval if not BNB
     if (!isTokenInBNB) {
