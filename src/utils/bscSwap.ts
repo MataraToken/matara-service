@@ -443,20 +443,52 @@ export async function getSwapQuote(
     const provider = getBSCProvider();
     const router = new ethers.Contract(PANCAKESWAP_ROUTER_V2, PANCAKESWAP_ROUTER_ABI, provider);
 
-    const isTokenInBNB = tokenIn.toLowerCase() === WBNB_ADDRESS.toLowerCase() || 
-                         tokenIn.toLowerCase() === ethers.ZeroAddress;
-    const isTokenOutBNB = tokenOut.toLowerCase() === WBNB_ADDRESS.toLowerCase() || 
-                          tokenOut.toLowerCase() === ethers.ZeroAddress;
+    // Normalize addresses for comparison
+    const tokenInLower = tokenIn.toLowerCase();
+    const tokenOutLower = tokenOut.toLowerCase();
 
+    // Check if tokens are the same
+    if (tokenInLower === tokenOutLower) {
+      throw new Error('Cannot swap the same token');
+    }
+
+    const isTokenInBNB = tokenInLower === WBNB_ADDRESS.toLowerCase() || 
+                         tokenInLower === ethers.ZeroAddress.toLowerCase() ||
+                         tokenInLower === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    const isTokenOutBNB = tokenOutLower === WBNB_ADDRESS.toLowerCase() || 
+                          tokenOutLower === ethers.ZeroAddress.toLowerCase() ||
+                          tokenOutLower === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+    // Build swap path for PancakeSwap Router V2
+    // PancakeSwap uses WBNB as the base pair for routing
     const path: string[] = [];
-    if (!isTokenInBNB) {
+    
+    // Start with input token (or WBNB if input is BNB)
+    if (isTokenInBNB) {
+      path.push(WBNB_ADDRESS);
+    } else {
       path.push(tokenIn);
     }
+    
+    // Add intermediate token if needed (WBNB for token-to-token swaps)
     if (!isTokenInBNB && !isTokenOutBNB) {
+      // Token to token swap - use WBNB as intermediate
       path.push(WBNB_ADDRESS);
     }
-    if (!isTokenOutBNB) {
+    
+    // End with output token (or WBNB if output is BNB)
+    if (isTokenOutBNB) {
+      if (!isTokenInBNB) {
+        // Only add WBNB if it's not already in the path
+        path.push(WBNB_ADDRESS);
+      }
+    } else {
       path.push(tokenOut);
+    }
+
+    // Validate path has at least 2 elements
+    if (path.length < 2) {
+      throw new Error(`Invalid swap path: path must have at least 2 tokens. Path: ${path.join(' -> ')}`);
     }
 
     const tokenInDecimals = isTokenInBNB ? 18 : await getTokenDecimals(tokenIn, provider);

@@ -4,7 +4,47 @@ import mongoose from "mongoose";
 import { executeBSCTokenTransfer, getTokenInfo } from "../utils/bscTransfer";
 import { createTransaction } from "../services/transaction.service";
 import { ethers } from "ethers";
-import { isAdmin } from "../middleware/admin";
+
+/**
+ * Verify and load user by username
+ */
+export const verifyUsername = async (req: Request, res: Response) => {
+  const { username } = req.query;
+
+  try {
+    // Validate username parameter
+    if (!username || typeof username !== "string") {
+      return res.status(400).json({
+        message: "Username is required",
+      });
+    }
+
+    // Find user by username
+    const user = await User.findOne({ username }).lean();
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+        exists: false,
+      });
+    }
+
+    // Return user info (excluding sensitive data)
+    const { encryptedPrivateKey, password, ...userInfo } = user;
+
+    return res.status(200).json({
+      message: "User found",
+      exists: true,
+      data: {
+        ...userInfo,
+        hasWallet: !!user.walletAddress,
+      },
+    });
+  } catch (error) {
+    console.error("Error verifying username:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 /**
  * Send tokens to a user by username (internal transfer)
