@@ -78,7 +78,7 @@ export const createSwapRequest = async (req: Request, res: Response) => {
 
     // Calculate deadline - since swap executes immediately, use a short deadline (5 minutes)
     // This protects against network delays while still allowing immediate execution
-    // Deadline is required by PancakeSwap Router contract
+    // Deadline is required by PancakeSwap Router V4 contract
     let swapDeadline = deadline || Math.floor(Date.now() / 1000) + 300; // Default 5 minutes
     
     // Validate deadline is not in the past and is reasonable (max 1 hour)
@@ -107,7 +107,7 @@ export const createSwapRequest = async (req: Request, res: Response) => {
       const amountOutNum = parseFloat(amountOut);
       calculatedAmountOutMin = (amountOutNum * (100 - swapSlippage) / 100).toFixed(18);
     } else if (!calculatedAmountOutMin) {
-      // Try to get quote from PancakeSwap
+      // Try to get quote from PancakeSwap V4
       try {
         const quote = await getSwapQuote(tokenIn, tokenOut, amountIn);
         const quoteAmountOut = parseFloat(quote.amountOut);
