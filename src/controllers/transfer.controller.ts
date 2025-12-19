@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { executeBSCTokenTransfer, getTokenInfo } from "../utils/bscTransfer";
 import { createTransaction } from "../services/transaction.service";
 import { ethers } from "ethers";
+import { logWalletOperation, logAdminOperation } from "../services/audit.service";
 
 /**
  * Verify and load user by username
@@ -161,6 +162,26 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Get client IP for audit logging
+    const clientIP =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      (req.headers["x-real-ip"] as string) ||
+      req.socket.remoteAddress ||
+      "";
+
+    // Get authenticated user
+    const authenticatedUser = (req.user as any);
+    
+    // Log transfer attempt
+    logWalletOperation("TRANSFER_TO_USER", {
+      userId: authenticatedUser?.id || "system",
+      username: authenticatedUser?.username || "system",
+      walletAddress: "", // Will be set after finding recipient
+      amount,
+      tokenAddress,
+      ipAddress: clientIP,
+    });
+
     // Execute transfer
     const transferResult = await executeBSCTokenTransfer({
       tokenAddress,
@@ -172,6 +193,18 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
     });
 
     if (!transferResult.success) {
+      // Log failed transfer
+      logWalletOperation("TRANSFER", {
+        userId: recipientUser._id.toString(),
+        username: recipientUser.username,
+        walletAddress: recipientUser.walletAddress,
+        amount,
+        tokenAddress,
+        ipAddress: clientIP,
+        success: false,
+        error: transferResult.error,
+      });
+
       return res.status(400).json({
         message: "Transfer failed",
         error: transferResult.error,
@@ -222,6 +255,18 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
     } catch (txLogError) {
       console.error("Error logging transfer transaction:", txLogError);
     }
+
+    // Log successful transfer
+    logWalletOperation("TRANSFER", {
+      userId: recipientUser._id.toString(),
+      username: recipientUser.username,
+      walletAddress: recipientUser.walletAddress,
+      transactionHash: transferResult.transactionHash,
+      amount,
+      tokenAddress,
+      ipAddress: clientIP,
+      success: true,
+    });
 
     return res.status(200).json({
       message: "Tokens sent successfully",
@@ -354,6 +399,26 @@ export const sendTokensToExternal = async (req: Request, res: Response) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Get client IP for audit logging
+    const clientIP =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      (req.headers["x-real-ip"] as string) ||
+      req.socket.remoteAddress ||
+      "";
+
+    // Get authenticated user
+    const authenticatedUser = (req.user as any);
+    
+    // Log transfer attempt
+    logWalletOperation("TRANSFER_TO_EXTERNAL", {
+      userId: authenticatedUser?.id || "system",
+      username: authenticatedUser?.username || "system",
+      walletAddress: toAddress,
+      amount,
+      tokenAddress,
+      ipAddress: clientIP,
+    });
+
     // Execute transfer
     const transferResult = await executeBSCTokenTransfer({
       tokenAddress,
@@ -365,6 +430,16 @@ export const sendTokensToExternal = async (req: Request, res: Response) => {
     });
 
     if (!transferResult.success) {
+      // Log failed transfer
+      logWalletOperation("TRANSFER_EXTERNAL", {
+        walletAddress: toAddress,
+        amount,
+        tokenAddress,
+        ipAddress: clientIP,
+        success: false,
+        error: transferResult.error,
+      });
+
       return res.status(400).json({
         message: "Transfer failed",
         error: transferResult.error,
@@ -427,6 +502,16 @@ export const sendTokensToExternal = async (req: Request, res: Response) => {
         console.error("Error logging transfer transaction:", txLogError);
       }
     }
+
+    // Log successful transfer
+    logWalletOperation("TRANSFER_EXTERNAL", {
+      walletAddress: toAddress,
+      transactionHash: transferResult.transactionHash,
+      amount,
+      tokenAddress,
+      ipAddress: clientIP,
+      success: true,
+    });
 
     return res.status(200).json({
       message: "Tokens sent successfully",

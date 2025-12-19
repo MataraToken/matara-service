@@ -4,16 +4,41 @@ import {
   sendTokensToExternal,
   verifyUsername,
 } from "../controllers/transfer.controller";
-// import { isAdmin } from "../middleware/admin";
+import { authenticateToken } from "../middleware/auth";
+import {
+  transferRateLimiter,
+  validateTokenAddress,
+  validateAmount,
+  validateWalletAddress,
+} from "../middleware/security";
+import { checkTransactionLimits } from "../middleware/transaction-limits";
 
 const router = Router();
 
-// Verify and load user by username
+// Verify and load user by username (public, but rate limited)
 router.get("/verify-username", verifyUsername);
 
-// Admin-only routes for sending tokens
-router.post("/user", sendTokensToUser);
-router.post("/external", sendTokensToExternal);
+// User routes for sending tokens (require authentication)
+router.post(
+  "/user",
+  authenticateToken,
+  transferRateLimiter,
+  validateTokenAddress,
+  validateAmount,
+  checkTransactionLimits,
+  sendTokensToUser
+);
+
+router.post(
+  "/external",
+  authenticateToken,
+  transferRateLimiter,
+  validateTokenAddress,
+  validateAmount,
+  validateWalletAddress,
+  checkTransactionLimits,
+  sendTokensToExternal
+);
 
 export default router;
 

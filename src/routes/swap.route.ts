@@ -8,18 +8,41 @@ import {
   getSwapFeeStats,
 } from "../controllers/swap.controller";
 import { isAdmin } from "../middleware/admin";
+import { authenticateToken } from "../middleware/auth";
+import {
+  swapRateLimiter,
+  walletOperationRateLimiter,
+  validateTokenAddress,
+  validateAmount,
+} from "../middleware/security";
+import { checkTransactionLimits } from "../middleware/transaction-limits";
 
 const router = Router();
 
-// User routes
-router.post("/", createSwapRequest);
-router.get("/user", getUserSwapRequests);
-router.get("/:swapRequestId", getSwapRequest);
+// User routes (require authentication)
+router.post(
+  "/",
+  authenticateToken,
+  swapRateLimiter,
+  validateTokenAddress,
+  validateAmount,
+  checkTransactionLimits,
+  createSwapRequest
+);
 
-// Admin routes
-router.get("/admin/all", isAdmin, getAllSwapRequests);
-router.patch("/admin/:swapRequestId", isAdmin, updateSwapRequestStatus);
-router.get("/admin/stats", isAdmin, getSwapFeeStats);
+router.get("/user", authenticateToken, getUserSwapRequests);
+router.get("/:swapRequestId", authenticateToken, getSwapRequest);
+
+// Admin routes (require authentication and admin privileges)
+router.get("/admin/all", authenticateToken, isAdmin, getAllSwapRequests);
+router.patch(
+  "/admin/:swapRequestId",
+  authenticateToken,
+  isAdmin,
+  walletOperationRateLimiter,
+  updateSwapRequestStatus
+);
+router.get("/admin/stats", authenticateToken, isAdmin, getSwapFeeStats);
 
 export default router;
 

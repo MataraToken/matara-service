@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import User from "../model/user.model";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { logAuthEvent } from "../services/audit.service";
 
 export const checkPasswordStatus = async (req: Request, res: Response) => {
   const { username } = req.query;
@@ -95,15 +96,35 @@ export const loginUser = async (req: Request, res: Response) => {
     });
   }
 
+  // Get client IP for audit logging
+  const clientIP =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+    (req.headers["x-real-ip"] as string) ||
+    req.socket.remoteAddress ||
+    "";
+
   try {
     const user = await User.findOne({ username }).select("+password");
     if (!user) {
+      logAuthEvent("LOGIN_FAILED", {
+        username,
+        ipAddress: clientIP,
+        success: false,
+        error: "User not found",
+      });
       return res.status(404).json({ 
         message: "User not found" 
       });
     }
 
     if (!user.hasPassword) {
+      logAuthEvent("LOGIN_FAILED", {
+        userId: user._id.toString(),
+        username: user.username,
+        ipAddress: clientIP,
+        success: false,
+        error: "Password not set",
+      });
       return res.status(400).json({ 
         message: "User has not set a password yet" 
       });
@@ -112,6 +133,13 @@ export const loginUser = async (req: Request, res: Response) => {
     // Compare password
     const isPasswordCorrect = await bcrypt.compare(password, user.password!);
     if (!isPasswordCorrect) {
+      logAuthEvent("LOGIN_FAILED", {
+        userId: user._id.toString(),
+        username: user.username,
+        ipAddress: clientIP,
+        success: false,
+        error: "Invalid password",
+      });
       return res.status(401).json({ 
         message: "Invalid credentials" 
       });
@@ -129,6 +157,14 @@ export const loginUser = async (req: Request, res: Response) => {
         expiresIn: "24h",
       }
     );
+
+    // Log successful login
+    logAuthEvent("LOGIN_SUCCESS", {
+      userId: user._id.toString(),
+      username: user.username,
+      ipAddress: clientIP,
+      success: true,
+    });
 
     return res.status(200).json({
       token,

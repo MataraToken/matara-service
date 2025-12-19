@@ -22,12 +22,31 @@ import authRouter from "./routes/auth.route";
 import swapRouter from "./routes/swap.route";
 import transactionRouter from "./routes/transaction.route";
 import transferRouter from "./routes/transfer.route";
+import {
+  securityHeaders,
+  generalRateLimiter,
+  sanitizeInput,
+  requestTimeout,
+} from "./middleware/security";
+import { validateEnv } from "./utils/env-validator";
 
 const app = express();
 const port = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const RENDER_URL = process.env.SERVER_URL;
 const TELEGRAM_WEBHOOK_PATH = process.env.BOT_WEBHOOK_PATH;
+
+// Validate environment variables
+const envValidation = validateEnv();
+if (!envValidation.valid) {
+  console.error("❌ Environment validation failed:");
+  envValidation.errors.forEach((error) => console.error(`  - ${error}`));
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Environment validation failed. Please fix the errors above.");
+  } else {
+    console.warn("⚠️  Continuing in development mode despite validation errors");
+  }
+}
 
 if (!process.env.TELEGRAM_BOT_TOKEN) {
   throw new Error("TELEGRAM_BOT_TOKEN is required");
@@ -52,7 +71,10 @@ const allowedOrigins = [
   "https://matara-tma.vercel.app"         // local dev
 ];
 
-// Put this BEFORE your routes
+// Security headers (must be first)
+app.use(securityHeaders);
+
+// CORS configuration
 app.use(
   cors({
     origin: allowedOrigins,
@@ -64,6 +86,15 @@ app.use(
 
 // Handle all OPTIONS requests
 app.options("*", cors());
+
+// Request timeout (30 seconds)
+app.use(requestTimeout(30000));
+
+// Input sanitization
+app.use(sanitizeInput);
+
+// General rate limiting
+app.use(generalRateLimiter);
 
 // Increase body size limits for file uploads
 app.use(express.json({ limit: '50mb' }));

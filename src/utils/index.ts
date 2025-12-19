@@ -19,10 +19,27 @@ export const generateBSCWallet = () => {
   };
 };
 
+/**
+ * Encrypt private key with per-encryption salt
+ * Format: salt:iv:authTag:encrypted
+ * This ensures each encryption uses a unique salt for better security
+ */
 export const encryptPrivateKey = (privateKey: string, password: string): string => {
+  if (!password || password.length < 16) {
+    throw new Error('Encryption password must be at least 16 characters long');
+  }
+
   const algorithm = 'aes-256-gcm';
-  const key = crypto.scryptSync(password, 'salt', 32);
+  
+  // Generate a unique salt for each encryption (32 bytes)
+  const salt = crypto.randomBytes(32);
+  
+  // Derive key using scrypt with the unique salt
+  const key = crypto.scryptSync(password, salt, 32);
+  
+  // Generate random IV
   const iv = crypto.randomBytes(16);
+  
   const cipher = crypto.createCipheriv(algorithm, key, iv);
 
   let encrypted = cipher.update(privateKey, 'utf8', 'hex');
@@ -30,17 +47,49 @@ export const encryptPrivateKey = (privateKey: string, password: string): string 
 
   const authTag = cipher.getAuthTag();
 
-  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
+  // Format: salt:iv:authTag:encrypted
+  return salt.toString('hex') + ':' + iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 };
 
+/**
+ * Decrypt private key using salt from encrypted data
+ * Format: salt:iv:authTag:encrypted
+ */
 export const decryptPrivateKey = (encryptedData: string, password: string): string => {
-  const algorithm = 'aes-256-gcm';
-  const key = crypto.scryptSync(password, 'salt', 32);
+  if (!password || password.length < 16) {
+    throw new Error('Encryption password must be at least 16 characters long');
+  }
 
+  const algorithm = 'aes-256-gcm';
+  
   const parts = encryptedData.split(':');
-  const iv = Buffer.from(parts[0], 'hex');
-  const authTag = Buffer.from(parts[1], 'hex');
-  const encrypted = parts[2];
+  
+  // Support both old format (iv:authTag:encrypted) and new format (salt:iv:authTag:encrypted)
+  let salt: Buffer;
+  let iv: Buffer;
+  let authTag: Buffer;
+  let encrypted: string;
+
+  if (parts.length === 3) {
+    // Old format (backward compatibility): iv:authTag:encrypted
+    // Use environment variable salt or default (less secure but maintains compatibility)
+    const saltString = process.env.WALLET_ENCRYPTION_SALT || 'default-salt-change-in-production';
+    salt = Buffer.from(saltString, 'utf8');
+    iv = Buffer.from(parts[0], 'hex');
+    authTag = Buffer.from(parts[1], 'hex');
+    encrypted = parts[2];
+  } else if (parts.length === 4) {
+    // New format: salt:iv:authTag:encrypted
+    salt = Buffer.from(parts[0], 'hex');
+    iv = Buffer.from(parts[1], 'hex');
+    authTag = Buffer.from(parts[2], 'hex');
+    encrypted = parts[3];
+  } else {
+    throw new Error('Invalid encrypted data format');
+  }
+
+  // Derive key using the salt from encrypted data
+  const key = crypto.scryptSync(password, salt, 32);
 
   const decipher = crypto.createDecipheriv(algorithm, key, iv);
   decipher.setAuthTag(authTag);

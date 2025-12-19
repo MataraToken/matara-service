@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { executeBSCSwap, getSwapQuote } from "../utils/bscSwap";
 import { createTransaction } from "../services/transaction.service";
 import { ethers } from "ethers";
+import { logWalletOperation } from "../services/audit.service";
 
 export const createSwapRequest = async (req: Request, res: Response) => {
   const {
@@ -142,10 +143,27 @@ export const createSwapRequest = async (req: Request, res: Response) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Get client IP for audit logging
+    const clientIP =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      (req.headers["x-real-ip"] as string) ||
+      req.socket.remoteAddress ||
+      "";
+
     // Execute swap on-chain (outside of database transaction)
     // This allows the swap request to be saved even if swap execution fails
     let swapResult: any;
     try {
+      // Log swap attempt
+      logWalletOperation("SWAP_ATTEMPT", {
+        userId: user._id.toString(),
+        username: user.username,
+        walletAddress: user.walletAddress,
+        amount: amountIn,
+        tokenAddress: tokenIn,
+        ipAddress: clientIP,
+      });
+
       swapResult = await executeBSCSwap({
         tokenIn: swapRequest.tokenIn,
         tokenOut: swapRequest.tokenOut,
@@ -206,16 +224,52 @@ export const createSwapRequest = async (req: Request, res: Response) => {
           console.error("Error logging swap transaction:", txLogError);
           // Don't fail the swap if transaction logging fails
         }
+
+        // Log successful swap
+        logWalletOperation("SWAP", {
+          userId: user._id.toString(),
+          username: user.username,
+          walletAddress: swapRequest.walletAddress,
+          transactionHash: swapResult.transactionHash,
+          amount: amountIn,
+          tokenAddress: tokenIn,
+          ipAddress: clientIP,
+          success: true,
+        });
       } else {
         swapRequest.status = "failed";
         swapRequest.errorMessage = swapResult.error || "Swap execution failed";
         await swapRequest.save();
+
+        // Log failed swap
+        logWalletOperation("SWAP", {
+          userId: user._id.toString(),
+          username: user.username,
+          walletAddress: user.walletAddress,
+          amount: amountIn,
+          tokenAddress: tokenIn,
+          ipAddress: clientIP,
+          success: false,
+          error: swapResult.error || "Swap execution failed",
+        });
       }
     } catch (swapError) {
       console.error("Error executing swap:", swapError);
       swapRequest.status = "failed";
       swapRequest.errorMessage = swapError instanceof Error ? swapError.message : "Unknown error during swap execution";
       await swapRequest.save();
+
+      // Log failed swap
+      logWalletOperation("SWAP", {
+        userId: user._id.toString(),
+        username: user.username,
+        walletAddress: user.walletAddress,
+        amount: amountIn,
+        tokenAddress: tokenIn,
+        ipAddress: clientIP,
+        success: false,
+        error: swapError instanceof Error ? swapError.message : "Unknown error",
+      });
     }
 
     // Return response based on swap result
