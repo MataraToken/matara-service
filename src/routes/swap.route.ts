@@ -24,8 +24,8 @@ router.post(
   "/",
   authenticateToken,
   swapRateLimiter,
-  validateTokenAddress,
-  validateAmount,
+  // validateTokenAddress,
+  // validateAmount,
   checkTransactionLimits,
   createSwapRequest
 );

@@ -21,6 +21,8 @@ export const createSwapRequest = async (req: Request, res: Response) => {
     deadline,
   } = req.body;
 
+  console.log(req.body);
+
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -108,7 +110,7 @@ export const createSwapRequest = async (req: Request, res: Response) => {
       const amountOutNum = parseFloat(amountOut);
       calculatedAmountOutMin = (amountOutNum * (100 - swapSlippage) / 100).toFixed(18);
     } else if (!calculatedAmountOutMin) {
-      // Try to get quote from PancakeSwap V4
+      // Try to get quote from PancakeSwap
       try {
         const quote = await getSwapQuote(tokenIn, tokenOut, amountIn);
         const quoteAmountOut = parseFloat(quote.amountOut);

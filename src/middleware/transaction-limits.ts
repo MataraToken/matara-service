@@ -20,7 +20,9 @@ const cleanupOldRecords = () => {
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const yesterdayStr = yesterday.toISOString().split("T")[0];
 
-  for (const [key, record] of transactionStore.entries()) {
+  // Convert Map entries to array for iteration
+  const entries = Array.from(transactionStore.entries());
+  for (const [key, record] of entries) {
     if (record.date < yesterdayStr) {
       transactionStore.delete(key);
     }

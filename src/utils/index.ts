@@ -56,8 +56,8 @@ export const encryptPrivateKey = (privateKey: string, password: string): string 
  * Format: salt:iv:authTag:encrypted
  */
 export const decryptPrivateKey = (encryptedData: string, password: string): string => {
-  if (!password || password.length < 16) {
-    throw new Error('Encryption password must be at least 16 characters long');
+  if (!password) {
+    throw new Error('Encryption password is required');
   }
 
   const algorithm = 'aes-256-gcm';
@@ -72,32 +72,67 @@ export const decryptPrivateKey = (encryptedData: string, password: string): stri
 
   if (parts.length === 3) {
     // Old format (backward compatibility): iv:authTag:encrypted
-    // Use environment variable salt or default (less secure but maintains compatibility)
-    const saltString = process.env.WALLET_ENCRYPTION_SALT || 'default-salt-change-in-production';
-    salt = Buffer.from(saltString, 'utf8');
+    // Old wallets used the literal string 'salt' as the salt (as in the original code)
+    salt = Buffer.from('salt', 'utf8');
     iv = Buffer.from(parts[0], 'hex');
     authTag = Buffer.from(parts[1], 'hex');
     encrypted = parts[2];
   } else if (parts.length === 4) {
     // New format: salt:iv:authTag:encrypted
+    // Only enforce password length for new format wallets
+    if (password.length < 16) {
+      throw new Error('Encryption password must be at least 16 characters long for new format wallets');
+    }
     salt = Buffer.from(parts[0], 'hex');
     iv = Buffer.from(parts[1], 'hex');
     authTag = Buffer.from(parts[2], 'hex');
     encrypted = parts[3];
   } else {
-    throw new Error('Invalid encrypted data format');
+    throw new Error(`Invalid encrypted data format. Expected 3 or 4 parts, got ${parts.length}`);
   }
 
-  // Derive key using the salt from encrypted data
-  const key = crypto.scryptSync(password, salt, 32);
+  // List of passwords to try (for backward compatibility)
+  const passwordsToTry = [
+    password, // Current password
+    'default-encryption-key', // Original default password
+  ];
 
-  const decipher = crypto.createDecipheriv(algorithm, key, iv);
-  decipher.setAuthTag(authTag);
+  // Try each password until one works
+  let lastError: Error | null = null;
+  for (const tryPassword of passwordsToTry) {
+    try {
+      // Derive key using the salt from encrypted data
+      const key = crypto.scryptSync(tryPassword, salt, 32);
 
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
+      const decipher = crypto.createDecipheriv(algorithm, key, iv);
+      decipher.setAuthTag(authTag);
 
-  return decrypted;
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+
+      // If we get here, decryption succeeded
+      // Log if we used the old password (for migration purposes)
+      if (tryPassword === 'default-encryption-key' && password !== 'default-encryption-key') {
+        console.warn('⚠️  Decrypted wallet using old default password. Consider re-encrypting with new password.');
+      }
+
+      return decrypted;
+    } catch (error) {
+      // Save the error and try next password
+      lastError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+  }
+
+  // If all passwords failed, throw an error
+  if (lastError) {
+    if (lastError.message.includes('Unsupported state') || lastError.message.includes('unable to authenticate')) {
+      throw new Error('Decryption failed: Invalid password. Tried current password and default password. Wallet may be encrypted with a different password.');
+    }
+    throw lastError;
+  }
+
+  throw new Error('Decryption failed: Unknown error');
 };
 
 export const extractOrValidateTelegramID = (input) => {
