@@ -51,12 +51,18 @@ export const verifyUsername = async (req: Request, res: Response) => {
  * Send tokens to a user by username (internal transfer)
  */
 export const sendTokensToUser = async (req: Request, res: Response) => {
+  // Get authenticated user from JWT token
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Unauthorized: User not authenticated",
+    });
+  }
+
   const {
     username, // Recipient username
     tokenAddress,
     amount,
     tokenSymbol,
-    fromUsername, // Optional: sender username (if not provided, uses system wallet)
   } = req.body;
 
   const session = await mongoose.startSession();
@@ -88,54 +94,35 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Determine sender wallet
-    let senderUser;
-    let senderWalletAddress: string;
-    let senderEncryptedPrivateKey: string;
-
-    if (fromUsername) {
-      // Use specified user's wallet as sender
-      senderUser = await User.findOne({ username: fromUsername })
-        .select("+encryptedPrivateKey")
-        .session(session);
-      
-      if (!senderUser) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ message: "Sender user not found" });
-      }
-
-      if (!senderUser.walletAddress) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: "Sender user does not have a wallet address",
-        });
-      }
-
-      if (!senderUser.encryptedPrivateKey) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: "Sender user does not have an encrypted private key",
-        });
-      }
-
-      senderWalletAddress = senderUser.walletAddress;
-      senderEncryptedPrivateKey = senderUser.encryptedPrivateKey;
-    } else {
-      // Use system wallet (from environment)
-      senderWalletAddress = process.env.SYSTEM_WALLET_ADDRESS || "";
-      senderEncryptedPrivateKey = process.env.SYSTEM_ENCRYPTED_PRIVATE_KEY || "";
-
-      if (!senderWalletAddress || !senderEncryptedPrivateKey) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(500).json({
-          message: "System wallet not configured. Please provide fromUsername or configure SYSTEM_WALLET_ADDRESS and SYSTEM_ENCRYPTED_PRIVATE_KEY",
-        });
-      }
+    // Use authenticated user's wallet as sender
+    const senderUser = await User.findById(req.user.id)
+      .select("+encryptedPrivateKey")
+      .session(session);
+    
+    if (!senderUser) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Sender user not found" });
     }
+
+    if (!senderUser.walletAddress) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Sender user does not have a wallet address",
+      });
+    }
+
+    if (!senderUser.encryptedPrivateKey) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Sender user does not have an encrypted private key",
+      });
+    }
+
+    const senderWalletAddress = senderUser.walletAddress;
+    const senderEncryptedPrivateKey = senderUser.encryptedPrivateKey;
 
     // Validate amount
     const amountNum = parseFloat(amount);
@@ -248,7 +235,7 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
         confirmedAt: receipt ? new Date() : undefined,
         metadata: {
           transferType: "internal",
-          fromUsername: fromUsername || "system",
+          fromUsername: req.user.username,
           toUsername: username,
         },
       });
@@ -295,12 +282,18 @@ export const sendTokensToUser = async (req: Request, res: Response) => {
  * Send tokens to an external wallet address
  */
 export const sendTokensToExternal = async (req: Request, res: Response) => {
+  // Get authenticated user from JWT token
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Unauthorized: User not authenticated",
+    });
+  }
+
   const {
     toAddress, // External wallet address
     tokenAddress,
     amount,
     tokenSymbol,
-    fromUsername, // Optional: sender username (if not provided, uses system wallet)
   } = req.body;
 
   const session = await mongoose.startSession();
@@ -325,54 +318,35 @@ export const sendTokensToExternal = async (req: Request, res: Response) => {
       });
     }
 
-    // Determine sender wallet
-    let senderUser;
-    let senderWalletAddress: string;
-    let senderEncryptedPrivateKey: string;
-
-    if (fromUsername) {
-      // Use specified user's wallet as sender
-      senderUser = await User.findOne({ username: fromUsername })
-        .select("+encryptedPrivateKey")
-        .session(session);
-      
-      if (!senderUser) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({ message: "Sender user not found" });
-      }
-
-      if (!senderUser.walletAddress) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: "Sender user does not have a wallet address",
-        });
-      }
-
-      if (!senderUser.encryptedPrivateKey) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: "Sender user does not have an encrypted private key",
-        });
-      }
-
-      senderWalletAddress = senderUser.walletAddress;
-      senderEncryptedPrivateKey = senderUser.encryptedPrivateKey;
-    } else {
-      // Use system wallet (from environment)
-      senderWalletAddress = process.env.SYSTEM_WALLET_ADDRESS || "";
-      senderEncryptedPrivateKey = process.env.SYSTEM_ENCRYPTED_PRIVATE_KEY || "";
-
-      if (!senderWalletAddress || !senderEncryptedPrivateKey) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(500).json({
-          message: "System wallet not configured. Please provide fromUsername or configure SYSTEM_WALLET_ADDRESS and SYSTEM_ENCRYPTED_PRIVATE_KEY",
-        });
-      }
+    // Use authenticated user's wallet as sender
+    const senderUser = await User.findById(req.user.id)
+      .select("+encryptedPrivateKey")
+      .session(session);
+    
+    if (!senderUser) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "Sender user not found" });
     }
+
+    if (!senderUser.walletAddress) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Sender user does not have a wallet address",
+      });
+    }
+
+    if (!senderUser.encryptedPrivateKey) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Sender user does not have an encrypted private key",
+      });
+    }
+
+    const senderWalletAddress = senderUser.walletAddress;
+    const senderEncryptedPrivateKey = senderUser.encryptedPrivateKey;
 
     // Validate amount
     const amountNum = parseFloat(amount);
@@ -494,7 +468,7 @@ export const sendTokensToExternal = async (req: Request, res: Response) => {
           confirmedAt: receipt ? new Date() : undefined,
           metadata: {
             transferType: "external",
-            fromUsername: fromUsername || "system",
+            fromUsername: req.user.username,
             toAddress: toAddress,
           },
         });

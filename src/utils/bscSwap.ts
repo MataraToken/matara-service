@@ -164,6 +164,16 @@ async function checkGasBalance(
 
 /**
  * Execute swap on PancakeSwap
+ * 
+ * Fee Structure:
+ * 1. Gas fees: Always paid in BNB (native token) - required for all transactions
+ * 2. Service fees: Paid in the input token (e.g., MARS when swapping MARS->USDT)
+ * 3. DEX fees: Built into PancakeSwap swap (automatically deducted, typically 0.25%)
+ * 
+ * Example: Swapping MARS to USDT
+ * - You need BNB in wallet for gas fees
+ * - Service fee is deducted from MARS (input token)
+ * - PancakeSwap fee is built into the swap price
  */
 export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
   try {
@@ -339,6 +349,32 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       }
     }
 
+    // Always get a fresh quote FIRST to validate the swap and get the correct path
+    let quoteAmountOut: string;
+    let path: string[];
+    try {
+      const quote = await getSwapQuote(tokenIn, tokenOut, actualSwapAmount);
+      quoteAmountOut = quote.amountOut;
+      path = quote.path;
+      
+      // Validate quote is reasonable (not zero or extremely small)
+      const quoteAmountOutNum = parseFloat(quoteAmountOut);
+      if (quoteAmountOutNum <= 0 || isNaN(quoteAmountOutNum)) {
+        return {
+          success: false,
+          error: `Invalid swap quote: Cannot get a valid quote for this token pair. The pool may not exist or have insufficient liquidity.`,
+        };
+      }
+      
+      console.log(`Swap quote: ${actualSwapAmount} ${tokenIn} -> ${quoteAmountOut} ${tokenOut} via path: ${path.join(' -> ')}`);
+    } catch (quoteError) {
+      console.error('Error getting swap quote:', quoteError);
+      return {
+        success: false,
+        error: `Cannot get swap quote: ${quoteError instanceof Error ? quoteError.message : 'Unknown error'}. The token pair may not have sufficient liquidity on PancakeSwap.`,
+      };
+    }
+
     const router = new ethers.Contract(PANCAKESWAP_ROUTER_V2, PANCAKESWAP_ROUTER_ABI, signer);
 
     // Determine if output is BNB (input already checked above)
@@ -346,38 +382,33 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
                           tokenOut.toLowerCase() === ethers.ZeroAddress.toLowerCase() ||
                           tokenOut.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
-    // Build swap path for PancakeSwap Router V2
-    // PancakeSwap uses WBNB as the base pair for routing
-    const path: string[] = [];
-    
-    // Start with input token (or WBNB if input is BNB)
-    if (isTokenInBNB) {
-      path.push(WBNB_ADDRESS);
-    } else {
-      path.push(tokenIn);
-    }
-    
-    // Add intermediate token if needed (WBNB for token-to-token swaps)
-    if (!isTokenInBNB && !isTokenOutBNB) {
-      // Token to token swap - use WBNB as intermediate
-      path.push(WBNB_ADDRESS);
-    }
-    
-    // End with output token (or WBNB if output is BNB)
-    if (isTokenOutBNB) {
-      if (!isTokenInBNB) {
-        // Only add WBNB if it's not already in the path
-        path.push(WBNB_ADDRESS);
-      }
-    } else {
-      path.push(tokenOut);
-    }
-
     // Get token decimals
     const tokenInDecimals = isTokenInBNB ? 18 : await getTokenDecimals(tokenIn, provider);
     const tokenOutDecimals = isTokenOutBNB ? 18 : await getTokenDecimals(tokenOut, provider);
     const amountInWei = parseTokenAmount(actualSwapAmount, tokenInDecimals); // Use actual swap amount (after fee deduction)
-    
+
+    // Re-validate quote right before swap to account for any pool changes
+    let finalQuoteAmountOut: string;
+    try {
+      const reQuote = await getSwapQuote(tokenIn, tokenOut, actualSwapAmount);
+      finalQuoteAmountOut = reQuote.amountOut;
+      
+      // Check if quote changed significantly (more than 5% difference)
+      const originalQuoteNum = parseFloat(quoteAmountOut);
+      const newQuoteNum = parseFloat(finalQuoteAmountOut);
+      const quoteChangePercent = Math.abs((newQuoteNum - originalQuoteNum) / originalQuoteNum) * 100;
+      
+      if (quoteChangePercent > 5) {
+        console.warn(`Quote changed by ${quoteChangePercent.toFixed(2)}% between initial quote and execution. Using new quote.`);
+      }
+      
+      // Use the latest quote
+      quoteAmountOut = finalQuoteAmountOut;
+    } catch (reQuoteError) {
+      console.warn('Could not re-validate quote, using original:', reQuoteError);
+      // Continue with original quote
+    }
+
     // Recalculate amountOutMin based on actual swap amount if fee was deducted
     let amountOutMinWei: bigint;
     if (amountOutMin && parseFloat(amountOutMin) > 0) {
@@ -392,18 +423,34 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       } else {
         amountOutMinWei = parseTokenAmount(amountOutMin, tokenOutDecimals);
       }
-    } else {
-      // If no amountOutMin provided, get a fresh quote for the actual swap amount
-      // and apply slippage tolerance
-      try {
-        const quote = await getSwapQuote(tokenIn, tokenOut, actualSwapAmount);
-        const quoteAmountOut = parseFloat(quote.amountOut);
-        const slippageAdjusted = (quoteAmountOut * (100 - slippageTolerance) / 100).toFixed(18);
-        amountOutMinWei = parseTokenAmount(slippageAdjusted, tokenOutDecimals);
-      } catch (quoteError) {
-        console.warn('Could not get quote for actual swap amount, using zero minimum:', quoteError);
-        amountOutMinWei = BigInt(0);
+      
+      // Validate that provided amountOutMin is not higher than the quote
+      const quoteAmountOutWei = parseTokenAmount(quoteAmountOut, tokenOutDecimals);
+      if (amountOutMinWei > quoteAmountOutWei) {
+        return {
+          success: false,
+          error: `amountOutMin (${amountOutMin}) is higher than the expected output (${quoteAmountOut}). This swap cannot be executed.`,
+        };
       }
+    } else {
+      // If no amountOutMin provided, use quote with slippage tolerance
+      // Add an extra 0.5% safety buffer for price impact and pool changes
+      const safetyBuffer = 0.5;
+      const effectiveSlippage = slippageTolerance + safetyBuffer;
+      const quoteAmountOutNum = parseFloat(quoteAmountOut);
+      const slippageAdjusted = (quoteAmountOutNum * (100 - effectiveSlippage) / 100).toFixed(18);
+      amountOutMinWei = parseTokenAmount(slippageAdjusted, tokenOutDecimals);
+      
+      console.log(`Slippage: ${slippageTolerance}% + ${safetyBuffer}% safety buffer = ${effectiveSlippage}% total`);
+      console.log(`Expected output: ${quoteAmountOut}, Minimum output: ${ethers.formatUnits(amountOutMinWei, tokenOutDecimals)}`);
+    }
+    
+    // Additional validation: ensure amountOutMin is not zero
+    if (amountOutMinWei === BigInt(0)) {
+      return {
+        success: false,
+        error: 'Calculated minimum output amount is zero. This swap cannot be executed safely.',
+      };
     }
 
     // Handle token approval if not BNB
@@ -421,6 +468,69 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
       if (!approved) {
         throw new Error('Token approval failed');
       }
+    }
+
+    // Simulate the swap first using estimateGas to catch errors before sending transaction
+    // This helps catch "Pancake: K" errors early
+    console.log('Validating swap parameters...');
+    try {
+      const tokenInIsWBNB = tokenIn.toLowerCase() === WBNB_ADDRESS.toLowerCase();
+      const tokenOutIsWBNB = tokenOut.toLowerCase() === WBNB_ADDRESS.toLowerCase();
+      
+      let gasEstimate: bigint;
+      if (isTokenInBNB && !isTokenOutBNB) {
+        // Estimate gas for swapExactETHForTokens
+        gasEstimate = await router.swapExactETHForTokens.estimateGas(
+          amountOutMinWei,
+          path,
+          walletAddress,
+          deadline,
+          { value: amountInWei }
+        );
+      } else if (!isTokenInBNB && isTokenOutBNB) {
+        // Estimate gas for swapExactTokensForETH
+        gasEstimate = await router.swapExactTokensForETH.estimateGas(
+          amountInWei,
+          amountOutMinWei,
+          path,
+          walletAddress,
+          deadline
+        );
+      } else if (isTokenInBNB && isTokenOutBNB) {
+        throw new Error('Cannot swap BNB for BNB');
+      } else {
+        // Estimate gas for swapExactTokensForTokens
+        gasEstimate = await router.swapExactTokensForTokens.estimateGas(
+          amountInWei,
+          amountOutMinWei,
+          path,
+          walletAddress,
+          deadline
+        );
+      }
+      console.log(`✓ Swap validation successful. Estimated gas: ${gasEstimate.toString()}`);
+    } catch (simError) {
+      console.error('Swap validation failed:', simError);
+      // Provide helpful error message
+      if (simError instanceof Error) {
+        if (simError.message.includes('Pancake: K') || simError.message.includes('INSUFFICIENT')) {
+          return {
+            success: false,
+            error: `Swap validation failed: Insufficient liquidity or slippage too high. The pool may not have enough liquidity for this swap amount (${actualSwapAmount}). Try: 1) Reducing the swap amount, 2) Increasing slippage tolerance (current: ${slippageTolerance}%), or 3) Check if the pool has sufficient liquidity.`,
+          };
+        }
+        if (simError.message.includes('execution reverted')) {
+          return {
+            success: false,
+            error: `Swap validation failed: Transaction would revert. ${simError.message}. This usually means insufficient liquidity or the minimum output amount is too high.`,
+          };
+        }
+        return {
+          success: false,
+          error: `Swap validation failed: ${simError.message}. The swap would revert if executed.`,
+        };
+      }
+      throw simError;
     }
 
     // Execute swap based on token types
@@ -487,6 +597,42 @@ export async function executeBSCSwap(params: SwapParams): Promise<SwapResult> {
     };
   } catch (error) {
     console.error('Error executing BSC swap:', error);
+    
+    // Handle specific PancakeSwap errors
+    if (error instanceof Error) {
+      // "Pancake: K" error means insufficient liquidity or slippage issue
+      if (error.message.includes('Pancake: K') || error.message.includes('Pancake: INSUFFICIENT_OUTPUT_AMOUNT')) {
+        return {
+          success: false,
+          error: 'Swap failed: Insufficient liquidity or slippage too high. The pool may not have enough liquidity for this swap amount, or the minimum output amount is too high. Try reducing the swap amount or increasing slippage tolerance.',
+        };
+      }
+      
+      // "Pancake: INSUFFICIENT_INPUT_AMOUNT" error
+      if (error.message.includes('Pancake: INSUFFICIENT_INPUT_AMOUNT')) {
+        return {
+          success: false,
+          error: 'Swap failed: Insufficient input amount. The swap amount may be too small for this pool.',
+        };
+      }
+      
+      // Generic PancakeSwap errors
+      if (error.message.includes('Pancake:')) {
+        return {
+          success: false,
+          error: `Swap failed: ${error.message}. This may indicate insufficient liquidity, invalid path, or pool issues.`,
+        };
+      }
+      
+      // Transaction reverted errors
+      if (error.message.includes('execution reverted') || error.message.includes('revert')) {
+        return {
+          success: false,
+          error: `Swap transaction would revert: ${error.message}. Please check token balances, approvals, and pool liquidity.`,
+        };
+      }
+    }
+    
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -556,15 +702,52 @@ export async function getSwapQuote(
     const tokenInDecimals = isTokenInBNB ? 18 : await getTokenDecimals(tokenIn, provider);
     const amountInWei = parseTokenAmount(amountIn, tokenInDecimals);
 
-    const amounts = await router.getAmountsOut(amountInWei, path);
-    const amountOutWei = amounts[amounts.length - 1];
-    const tokenOutDecimals = isTokenOutBNB ? 18 : await getTokenDecimals(tokenOut, provider);
-    const amountOut = ethers.formatUnits(amountOutWei, tokenOutDecimals);
+    try {
+      const amounts = await router.getAmountsOut(amountInWei, path);
+      
+      // Validate amounts array
+      if (!amounts || amounts.length === 0) {
+        throw new Error('Invalid quote response: No amounts returned');
+      }
+      
+      const amountOutWei = amounts[amounts.length - 1];
+      
+      // Check if amount out is zero or very small (indicates no liquidity)
+      if (amountOutWei === BigInt(0)) {
+        throw new Error('No liquidity available for this swap path. The pool may not exist or have zero liquidity.');
+      }
+      
+      const tokenOutDecimals = isTokenOutBNB ? 18 : await getTokenDecimals(tokenOut, provider);
+      const amountOut = ethers.formatUnits(amountOutWei, tokenOutDecimals);
+      
+      // Validate the output amount is reasonable
+      const amountOutNum = parseFloat(amountOut);
+      if (amountOutNum <= 0 || isNaN(amountOutNum)) {
+        throw new Error('Invalid quote: Output amount is zero or invalid');
+      }
 
-    return {
-      amountOut,
-      path,
-    };
+      return {
+        amountOut,
+        path,
+      };
+    } catch (quoteError) {
+      // Provide more specific error messages
+      if (quoteError instanceof Error) {
+        // PancakeSwap specific errors
+        if (quoteError.message.includes('Pancake: INSUFFICIENT_INPUT_AMOUNT') || 
+            quoteError.message.includes('Pancake: K') ||
+            quoteError.message.includes('INSUFFICIENT')) {
+          throw new Error(`Insufficient liquidity: The pool for ${tokenIn} -> ${tokenOut} may not have enough liquidity for this swap amount. Try a smaller amount or check if the pool exists.`);
+        }
+        
+        // Generic revert errors
+        if (quoteError.message.includes('execution reverted') || quoteError.message.includes('revert')) {
+          throw new Error(`Cannot get quote: The swap path ${path.join(' -> ')} may not exist or have liquidity. Error: ${quoteError.message}`);
+        }
+      }
+      
+      throw quoteError;
+    }
   } catch (error) {
     console.error('Error getting swap quote:', error);
     throw error;

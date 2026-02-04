@@ -30,6 +30,7 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@lifi/sdk": "^3.15.3",
     "@pancakeswap/universal-router-sdk": "^1.4.16",
     "@pancakeswap/v4-sdk": "^0.1.8",
     "@types/bcrypt": "^6.0.0",

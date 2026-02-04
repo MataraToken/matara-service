@@ -219,8 +219,13 @@ export const updateTask = async (req: Request, res: Response) => {
 };
 
 export const completeTask = async (req: Request, res: Response) => {
+  // Get authenticated user from JWT token
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized: User not authenticated" });
+  }
+
   const { slug } = req.params;
-  const { username, proofUrl } = req.body;
+  const { proofUrl } = req.body;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -239,7 +244,8 @@ export const completeTask = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
-    const user = await User.findOne({ username }).session(session);
+    // Get user from JWT token
+    const user = await User.findById(req.user.id).session(session);
     if (!user) {
       await session.abortTransaction();
       session.endSession();

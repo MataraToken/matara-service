@@ -23,11 +23,10 @@ const transactionSchema = new mongoose.Schema(
       enum: ["deposit", "withdrawal", "swap", "transfer", "approval", "other"],
       required: true,
     },
-    // Transaction hash
+    // Transaction hash (compound unique with tokenAddress is defined in indexes below)
     transactionHash: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
     },
     // Block information
@@ -127,7 +126,9 @@ const transactionSchema = new mongoose.Schema(
 // Indexes for faster queries
 transactionSchema.index({ userId: 1, createdAt: -1 });
 transactionSchema.index({ walletAddress: 1, createdAt: -1 });
-transactionSchema.index({ transactionHash: 1 }, { unique: true });
+// Compound unique: allows multiple records per tx for different tokens (e.g. two ERC20 deposits in one tx).
+// If you have an existing unique index on transactionHash only, drop it first: db.transactions.dropIndex("transactionHash_1")
+transactionSchema.index({ transactionHash: 1, tokenAddress: 1 }, { unique: true });
 transactionSchema.index({ type: 1, createdAt: -1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ chain: 1, blockNumber: -1 });

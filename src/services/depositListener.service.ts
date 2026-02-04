@@ -158,7 +158,7 @@ class DepositListenerService {
     try {
       return await fn();
     } catch (error: any) {
-      // Retry on timeout, rate limit, or bad data errors
+      // Retry on timeout, rate limit, bad data. Do NOT retry -32005 "limit exceeded" (request shape; handled by getLogs fallback).
       const isRetryableError = 
         error.code === 'TIMEOUT' ||
         error.code === 'BAD_DATA' ||
@@ -185,9 +185,9 @@ class DepositListenerService {
     if (!this.provider) return;
 
     try {
-      // Use retry logic for getBlock to handle timeouts
+      // Use retry logic for getBlock (false = hashes only; avoids prefetched tx object vs hash bugs)
       const block = await this.retryWithBackoff(async () => {
-        return await this.provider!.getBlock(blockNumber, true);
+        return await this.provider!.getBlock(blockNumber, false);
       });
       
       if (!block || !block.transactions) return;
@@ -201,71 +201,209 @@ class DepositListenerService {
       
       if (walletAddresses.length === 0) return;
 
-      // Process each transaction in the block
-      for (const txHash of block.transactions) {
-        if (typeof txHash !== "string") continue;
-
-        // Skip if already processing this transaction
-        if (this.processingTransactions.has(txHash)) {
-          continue;
-        }
+      // --- Native BNB: tx.to must be a monitored wallet and tx.value > 0 ---
+      for (const txRef of block.transactions) {
+        const txHash = typeof txRef === "string" ? txRef : (txRef as ethers.TransactionResponse).hash;
+        if (!txHash || this.processingTransactions.has(txHash)) continue;
 
         try {
           this.processingTransactions.add(txHash);
-          
-          // Use retry logic for transaction fetching
-          const tx = await this.retryWithBackoff(async () => {
-            return await this.provider!.getTransaction(txHash);
-          });
-          
-          if (!tx) {
-            this.processingTransactions.delete(txHash);
-            continue;
-          }
+          const tx = await this.retryWithBackoff(async () => this.provider!.getTransaction(txHash));
+          this.processingTransactions.delete(txHash);
 
-          // Check if transaction is to a monitored wallet
+          if (!tx) continue;
+
           const toAddress = tx.to?.toLowerCase();
           if (!toAddress || !walletAddresses.includes(toAddress)) continue;
 
-          // Check if it's a native BNB transfer
           if (tx.value && tx.value > BigInt(0)) {
             await this.handleNativeDeposit(tx, block, toAddress, users);
           }
-
-          // Check if it's a token transfer (ERC20)
-          if (tx.to && tx.to.toLowerCase() !== WBNB_ADDRESS.toLowerCase()) {
-            await this.handleTokenDeposit(tx, block, toAddress, users);
-          }
-          
-          this.processingTransactions.delete(txHash);
         } catch (txError: any) {
           this.processingTransactions.delete(txHash);
-          
-          // Only log non-retryable errors (timeout, rate limit, bad data are handled by retry)
-          const isRetryableError = 
-            txError.code === 'TIMEOUT' ||
-            txError.code === 'BAD_DATA' ||
-            txError.message?.includes('timeout') ||
-            txError.message?.includes('rate limit') ||
-            txError.shortMessage === 'request timeout';
-          
-          if (!isRetryableError) {
-            console.error(`Error processing transaction ${txHash}:`, txError);
-          }
-          
-          // If rate limited or timeout, increase delay
-          if (isRetryableError) {
-            this.rateLimitDelay = Math.min(this.rateLimitDelay * 1.2, 10000);
-            if (txError.code === 'TIMEOUT' || txError.shortMessage === 'request timeout') {
-              console.warn(`Timeout detected, increasing delay to ${this.rateLimitDelay}ms`);
-            } else {
-              console.warn(`Rate limit detected, increasing delay to ${this.rateLimitDelay}ms`);
+          const isRetryable =
+            txError.code === "TIMEOUT" ||
+            txError.code === "BAD_DATA" ||
+            txError.message?.includes("timeout") ||
+            txError.message?.includes("rate limit") ||
+            txError.shortMessage === "request timeout";
+          if (!isRetryable) console.error(`Error processing tx ${txHash}:`, txError);
+          if (isRetryable) this.rateLimitDelay = Math.min(this.rateLimitDelay * 1.2, 10000);
+        }
+      }
+
+      // --- ERC20: use getLogs for Transfer(to=our wallets). tx.to is the token contract, so we cannot filter by tx.to. ---
+      await this.processERC20DepositsFromLogs(blockNumber, block, walletAddresses, users);
+    } catch (error) {
+      console.error(`Error processing block ${blockNumber}:`, error);
+    }
+  }
+
+  /**
+   * Find ERC20 Transfer logs where the recipient (to) is one of our monitored wallets, and create deposit records.
+   * Uses getLogs because for token transfers tx.to is the token contract, not the recipient.
+   * Chunks wallet topics to avoid RPC "limit exceeded" (-32005) when many wallets are monitored.
+   */
+  private async processERC20DepositsFromLogs(
+    blockNumber: number,
+    block: ethers.Block,
+    walletAddresses: string[],
+    users: Array<{ _id: any; walletAddress?: string }>
+  ) {
+    if (!this.provider || walletAddresses.length === 0) return;
+
+    // Many BSC RPCs reject getLogs when topics[2] has >~4 addresses. Default 4; use 1 if still -32005.
+    const chunkSize = Math.max(1, parseInt(process.env.DEPOSIT_GETLOGS_TOPICS_CHUNK || "4", 10));
+
+    try {
+      const toTopics = walletAddresses.map((w) => ethers.zeroPadValue(w, 32));
+      const allLogs: ethers.Log[] = [];
+
+      for (let i = 0; i < toTopics.length; i += chunkSize) {
+        const chunk = toTopics.slice(i, i + chunkSize);
+        let chunkLogs: ethers.Log[];
+
+        try {
+          chunkLogs = await this.retryWithBackoff(async () =>
+            this.provider!.getLogs({
+              fromBlock: blockNumber,
+              toBlock: blockNumber,
+              topics: [ERC20_TRANSFER_TOPIC, null, chunk],
+            })
+          );
+        } catch (err: any) {
+          // -32005 "limit exceeded": RPC rejects this topic count. Fallback: 1 getLogs per topic.
+          if (err?.error?.code === -32005 || err?.error?.message === "limit exceeded" || err?.message?.includes("limit exceeded")) {
+            chunkLogs = [];
+            for (const t of chunk) {
+              try {
+                const one = await this.retryWithBackoff(() =>
+                  this.provider!.getLogs({
+                    fromBlock: blockNumber,
+                    toBlock: blockNumber,
+                    topics: [ERC20_TRANSFER_TOPIC, null, [t]],
+                  })
+                );
+                chunkLogs.push(...one);
+              } catch (_) { /* skip on failure */ }
+              await this.delay(120);
             }
+          } else {
+            throw err;
           }
+        }
+
+        allLogs.push(...chunkLogs);
+        if (i + chunkSize < toTopics.length) {
+          await this.delay(100);
+        }
+      }
+
+      // Dedupe by (transactionHash, logIndex, address) in case of overlap
+      const seen = new Set<string>();
+      const logs = allLogs.filter((l) => {
+        const key = `${(l as { transactionHash?: string }).transactionHash}-${(l as { logIndex?: number }).logIndex}-${l.address}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const receiptCache = new Map<string, ethers.TransactionReceipt | null>();
+
+      for (const log of logs) {
+        try {
+          const iface = new ethers.Interface([
+            "event Transfer(address indexed from, address indexed to, uint256 value)",
+          ]);
+          const parsed = iface.parseLog({ topics: log.topics as string[], data: log.data });
+          if (!parsed) continue;
+
+          const from = parsed.args[0].toLowerCase();
+          const to = parsed.args[1].toLowerCase();
+          const value = parsed.args[2];
+
+          if (from === to) continue;
+          if (!walletAddresses.includes(to)) continue;
+
+          const user = users.find((u) => u.walletAddress?.toLowerCase() === to);
+          if (!user) continue;
+
+          const txHash = (log as { transactionHash?: string }).transactionHash;
+          if (!txHash) continue;
+
+          const existing = await Transaction.findOne({
+            transactionHash: txHash.toLowerCase(),
+            tokenAddress: log.address.toLowerCase(),
+          });
+          if (existing) {
+            if (existing.status === "pending") {
+              await updateTransactionStatus(txHash, "confirmed", {
+                blockNumber: block.number,
+                blockHash: block.hash,
+                transactionTimestamp: new Date(Number(block.timestamp) * 1000),
+                confirmations: 1,
+              });
+            }
+            continue;
+          }
+
+          let rec = receiptCache.get(txHash);
+          if (rec === undefined) {
+            rec = await this.retryWithBackoff(async () => this.provider!.getTransactionReceipt(txHash));
+            receiptCache.set(txHash, rec);
+          }
+          const receipt = rec;
+          if (!receipt || !receipt.logs) continue;
+
+          const tokenContract = new ethers.Contract(
+            log.address,
+            ["function symbol() view returns (string)", "function decimals() view returns (uint8)"],
+            this.provider!
+          );
+          let tokenSymbol = "UNKNOWN";
+          let decimals = 18;
+          try {
+            tokenSymbol = await tokenContract.symbol();
+            decimals = await tokenContract.decimals();
+          } catch {
+            // ignore
+          }
+
+          const amount = ethers.formatUnits(value, decimals);
+          const gasFee = receipt
+            ? ethers.formatEther((receipt.gasUsed * (receipt.gasPrice || BigInt(0))).toString())
+            : "0";
+
+          await createTransaction({
+            userId: user._id.toString(),
+            walletAddress: to,
+            chain: this.config.chain,
+            type: "deposit",
+            transactionHash: txHash,
+            blockNumber: block.number,
+            blockHash: block.hash,
+            from,
+            to,
+            tokenAddress: log.address.toLowerCase(),
+            tokenSymbol,
+            amount: value.toString(),
+            amountFormatted: amount,
+            gasUsed: receipt.gasUsed.toString(),
+            gasPrice: receipt.gasPrice?.toString(),
+            gasFee,
+            status: "confirmed",
+            confirmations: 1,
+            transactionTimestamp: new Date(Number(block.timestamp) * 1000),
+            confirmedAt: new Date(),
+          });
+
+          console.log(`Logged token deposit: ${tokenSymbol} (${amount}) to ${to} - ${txHash}`);
+        } catch (e) {
+          console.error("Error processing ERC20 log:", e);
         }
       }
     } catch (error) {
-      console.error(`Error processing block ${blockNumber}:`, error);
+      console.error("Error in processERC20DepositsFromLogs:", error);
     }
   }
 
@@ -338,122 +476,6 @@ class DepositListenerService {
     }
   }
 
-  /**
-   * Handle ERC20 token deposit
-   */
-  private async handleTokenDeposit(
-    tx: ethers.TransactionResponse,
-    block: ethers.Block,
-    toAddress: string,
-    users: Array<{ _id: any; walletAddress?: string }>
-  ) {
-    try {
-      const user = users.find((u) => u.walletAddress?.toLowerCase() === toAddress);
-      if (!user) return;
-
-      // Get transaction receipt to check for Transfer events with retry
-      const receipt = await this.retryWithBackoff(async () => {
-        return await this.provider!.getTransactionReceipt(tx.hash);
-      });
-      if (!receipt || !receipt.logs) return;
-
-      // Check for Transfer events
-      for (const log of receipt.logs) {
-        if (log.topics[0] === ERC20_TRANSFER_TOPIC) {
-          // Parse Transfer event
-          const transferInterface = new ethers.Interface([
-            "event Transfer(address indexed from, address indexed to, uint256 value)",
-          ]);
-          
-          try {
-            const parsedLog = transferInterface.parseLog({
-              topics: log.topics,
-              data: log.data,
-            });
-
-            if (!parsedLog) continue;
-
-            const from = parsedLog.args[0].toLowerCase();
-            const to = parsedLog.args[1].toLowerCase();
-            const value = parsedLog.args[2];
-
-            // Only process if it's a deposit (to our monitored wallet)
-            if (to !== toAddress) continue;
-
-            // Check if transaction already exists
-            const existing = await Transaction.findOne({
-              transactionHash: tx.hash.toLowerCase(),
-              tokenAddress: log.address.toLowerCase(),
-            });
-
-            if (existing) {
-              if (existing.status === "pending") {
-                await updateTransactionStatus(tx.hash, "confirmed", {
-                  blockNumber: block.number,
-                  blockHash: block.hash,
-                  transactionTimestamp: new Date(Number(block.timestamp) * 1000),
-                  confirmations: 1,
-                });
-              }
-              continue;
-            }
-
-            // Get token info (symbol, decimals)
-            const tokenContract = new ethers.Contract(
-              log.address,
-              ["function symbol() view returns (string)", "function decimals() view returns (uint8)"],
-              this.provider!
-            );
-
-            let tokenSymbol = "UNKNOWN";
-            let decimals = 18;
-
-            try {
-              tokenSymbol = await tokenContract.symbol();
-              decimals = await tokenContract.decimals();
-            } catch (tokenError) {
-              console.warn(`Could not get token info for ${log.address}:`, tokenError);
-            }
-
-            const amount = ethers.formatUnits(value, decimals);
-            const gasFee = receipt
-              ? ethers.formatEther((receipt.gasUsed * (receipt.gasPrice || BigInt(0))).toString())
-              : "0";
-
-            // Create transaction record
-            await createTransaction({
-              userId: user._id.toString(),
-              walletAddress: toAddress,
-              chain: this.config.chain,
-              type: "deposit",
-              transactionHash: tx.hash,
-              blockNumber: block.number,
-              blockHash: block.hash,
-              from: from,
-              to: to,
-              tokenAddress: log.address.toLowerCase(),
-              tokenSymbol,
-              amount: value.toString(),
-              amountFormatted: amount,
-              gasUsed: receipt.gasUsed.toString(),
-              gasPrice: receipt.gasPrice?.toString(),
-              gasFee,
-              status: "confirmed",
-              confirmations: 1,
-              transactionTimestamp: new Date(Number(block.timestamp) * 1000),
-              confirmedAt: new Date(),
-            });
-
-            console.log(`Logged token deposit: ${tokenSymbol} (${amount}) to ${toAddress} - ${tx.hash}`);
-          } catch (parseError) {
-            console.error("Error parsing Transfer event:", parseError);
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error handling token deposit:", error);
-    }
-  }
 }
 
 // Singleton instance

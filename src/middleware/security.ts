@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { body, param, query, validationResult } from "express-validator";
+import { isTokenSupported, getTokenByAddress, getTokenBySymbol } from "../config/tokens";
 
 /**
  * Security headers middleware using Helmet
@@ -120,7 +121,7 @@ export const validateWalletAddress = [
 ];
 
 /**
- * Token address validation
+ * Token address validation - checks format and if token is supported
  */
 export const validateTokenAddress = [
   body("tokenAddress")
@@ -130,26 +131,128 @@ export const validateTokenAddress = [
       if (typeof value !== "string") {
         throw new Error("Token address must be a string");
       }
-      // Allow native token indicators
+      
+      const normalizedValue = value.toLowerCase();
+      
+      // Check if it's a valid address format or native indicator
       const nativeIndicators = [
         "native",
         "0x0000000000000000000000000000000000000000",
         "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       ];
-      if (nativeIndicators.includes(value.toLowerCase())) {
-        return true;
-      }
-      // Ethereum/BSC address validation
-      if (!/^0x[a-fA-F0-9]{40}$/.test(value)) {
+      
+      const isValidFormat = nativeIndicators.includes(normalizedValue) || 
+                           /^0x[a-fA-F0-9]{40}$/.test(value);
+      
+      if (!isValidFormat) {
         throw new Error("Invalid token address format");
       }
+      
+      // Check if token is supported
+      if (!isTokenSupported(value)) {
+        const tokenInfo = getTokenByAddress(value);
+        throw new Error(
+          `Token not supported. Supported tokens: MARS, BNB, WKC, DTG, YUKAN, TWD, TKC, ETH, USDT`
+        );
+      }
+      
       return true;
     }),
   handleValidationErrors,
 ];
 
 /**
- * Amount validation
+ * Validate tokenIn for swap operations (accepts both symbols and addresses)
+ */
+export const validateTokenIn = [
+  body("tokenIn")
+    .notEmpty()
+    .withMessage("tokenIn is required")
+    .custom((value) => {
+      if (typeof value !== "string") {
+        throw new Error("tokenIn must be a string");
+      }
+      
+      // First, try to resolve as a symbol
+      const tokenBySymbol = getTokenBySymbol(value);
+      if (tokenBySymbol) {
+        // Valid symbol - will be resolved to address in controller
+        return true;
+      }
+      
+      // If not a symbol, check if it's a valid address format
+      const normalizedValue = value.toLowerCase();
+      const nativeIndicators = [
+        "native",
+        "0x0000000000000000000000000000000000000000",
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      ];
+      
+      const isValidFormat = nativeIndicators.includes(normalizedValue) || 
+                           /^0x[a-fA-F0-9]{40}$/.test(value);
+      
+      if (!isValidFormat) {
+        throw new Error("Invalid tokenIn format. Must be a token symbol (e.g., USDT, BNB) or a valid contract address");
+      }
+      
+      if (!isTokenSupported(value)) {
+        throw new Error(
+          `tokenIn not supported. Supported tokens: MARS, BNB, WKC, DTG, YUKAN, TWD, TKC, ETH, USDT`
+        );
+      }
+      
+      return true;
+    }),
+  handleValidationErrors,
+];
+
+/**
+ * Validate tokenOut for swap operations (accepts both symbols and addresses)
+ */
+export const validateTokenOut = [
+  body("tokenOut")
+    .notEmpty()
+    .withMessage("tokenOut is required")
+    .custom((value) => {
+      if (typeof value !== "string") {
+        throw new Error("tokenOut must be a string");
+      }
+      
+      // First, try to resolve as a symbol
+      const tokenBySymbol = getTokenBySymbol(value);
+      if (tokenBySymbol) {
+        // Valid symbol - will be resolved to address in controller
+        return true;
+      }
+      
+      // If not a symbol, check if it's a valid address format
+      const normalizedValue = value.toLowerCase();
+      const nativeIndicators = [
+        "native",
+        "0x0000000000000000000000000000000000000000",
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      ];
+      
+      const isValidFormat = nativeIndicators.includes(normalizedValue) || 
+                           /^0x[a-fA-F0-9]{40}$/.test(value);
+      
+      if (!isValidFormat) {
+        throw new Error("Invalid tokenOut format. Must be a token symbol (e.g., USDT, BNB) or a valid contract address");
+      }
+      
+      if (!isTokenSupported(value)) {
+        throw new Error(
+          `tokenOut not supported. Supported tokens: MARS, BNB, WKC, DTG, YUKAN, TWD, TKC, ETH, USDT`
+        );
+      }
+      
+      return true;
+    }),
+  handleValidationErrors,
+];
+
+/**
+ * Amount validation (for transfers)
  */
 export const validateAmount = [
   body("amount")
@@ -162,6 +265,26 @@ export const validateAmount = [
       }
       if (num > 1e18) {
         throw new Error("Amount is too large");
+      }
+      return true;
+    }),
+  handleValidationErrors,
+];
+
+/**
+ * Amount validation for swap operations (validates amountIn)
+ */
+export const validateAmountIn = [
+  body("amountIn")
+    .notEmpty()
+    .withMessage("amountIn is required")
+    .custom((value) => {
+      const num = parseFloat(value);
+      if (isNaN(num) || num <= 0) {
+        throw new Error("amountIn must be a positive number");
+      }
+      if (num > 1e18) {
+        throw new Error("amountIn is too large");
       }
       return true;
     }),

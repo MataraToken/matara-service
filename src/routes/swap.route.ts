@@ -12,21 +12,26 @@ import { authenticateToken } from "../middleware/auth";
 import {
   swapRateLimiter,
   walletOperationRateLimiter,
-  validateTokenAddress,
-  validateAmount,
+  validateTokenIn,
+  validateTokenOut,
+  validateAmountIn,
+  requestTimeout,
 } from "../middleware/security";
 import { checkTransactionLimits } from "../middleware/transaction-limits";
 
 const router = Router();
 
 // User routes (require authentication)
+// Swap operations can take longer due to blockchain transactions, so use a longer timeout (2 minutes)
 router.post(
   "/",
   authenticateToken,
   swapRateLimiter,
-  // validateTokenAddress,
-  // validateAmount,
+  validateTokenIn,
+  validateTokenOut,
+  validateAmountIn,
   checkTransactionLimits,
+  requestTimeout(120000), // 2 minutes for swap execution
   createSwapRequest
 );
 

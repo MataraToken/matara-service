@@ -3,6 +3,7 @@ import User from "../model/user.model";
 import { Request, Response } from "express";
 import Point from "../model/points.model";
 import mongoose from "mongoose";
+import { getAllSupportedTokens } from "../config/tokens";
 
 export const registerUser = async (req: Request, res: Response) => {
   const { username, referralCode, premium, profilePicture, firstName } = req.body;
@@ -69,6 +70,9 @@ export const registerUser = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get user by username (public endpoint - can look up any user)
+ */
 export const getUser = async (req: Request, res: Response) => {
   const { username } = req.query;
   try {
@@ -89,6 +93,37 @@ export const getUser = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error fetching user:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Get current authenticated user's info (uses JWT)
+ */
+export const getCurrentUser = async (req: Request, res: Response) => {
+  // Get user from JWT token (set by authenticateToken middleware)
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized: User not authenticated" });
+  }
+
+  try {
+    const user = await User.findById(req.user.id).lean();
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const userPoints = await Point.findOne({ userId: user._id }).lean();
+
+    const { userBoosts, tasksCompleted, milestonesCompleted, referrals, encryptedPrivateKey, ...filteredUser } = user;
+
+    const mergedData = { ...filteredUser, ...userPoints };
+
+    return res.status(200).json({
+      data: mergedData,
+      message: "Current user fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching current user:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -200,3 +235,18 @@ export const getLeaderboard = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Get list of supported tokens for send, receive, and swap operations
+ */
+export const getSupportedTokens = async (req: Request, res: Response) => {
+  try {
+    const tokens = getAllSupportedTokens();
+    res.status(200).json({
+      data: tokens,
+      message: "Supported tokens fetched successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching supported tokens:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};

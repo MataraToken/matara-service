@@ -37,11 +37,13 @@ export interface CreateTransactionParams {
  * Create a new transaction record
  */
 export async function createTransaction(params: CreateTransactionParams) {
-  try {
-    // Check if transaction already exists
-    const existing = await Transaction.findOne({
-      transactionHash: params.transactionHash.toLowerCase(),
-    });
+    try {
+      // Check if transaction already exists (use transactionHash + tokenAddress for deposits to allow multiple tokens per tx)
+    const findQuery: Record<string, string> = { transactionHash: params.transactionHash.toLowerCase() };
+    if (params.tokenAddress != null && params.tokenAddress !== "") {
+      findQuery.tokenAddress = params.tokenAddress.toLowerCase();
+    }
+    const existing = await Transaction.findOne(findQuery);
 
     if (existing) {
       return existing; // Return existing transaction

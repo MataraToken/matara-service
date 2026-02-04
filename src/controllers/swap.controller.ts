@@ -2,14 +2,14 @@ import { Request, Response } from "express";
 import User from "../model/user.model";
 import SwapRequest from "../model/swapRequest.model";
 import mongoose from "mongoose";
-import { executeBSCSwap, getSwapQuote } from "../utils/bscSwap";
+import { executeZeroExSwap, getZeroExQuote } from "../utils/zeroExSwap";
 import { createTransaction } from "../services/transaction.service";
 import { ethers } from "ethers";
 import { logWalletOperation } from "../services/audit.service";
+import { getTokenBySymbol, getTokenByAddress, NATIVE_BNB_INDICATORS } from "../config/tokens";
 
 export const createSwapRequest = async (req: Request, res: Response) => {
   const {
-    username,
     tokenIn,
     tokenOut,
     tokenInSymbol,
@@ -21,6 +21,13 @@ export const createSwapRequest = async (req: Request, res: Response) => {
     deadline,
   } = req.body;
 
+  // Get user from JWT token (set by authenticateToken middleware)
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Unauthorized: User not authenticated",
+    });
+  }
+
   console.log(req.body);
 
   const session = await mongoose.startSession();
@@ -28,16 +35,66 @@ export const createSwapRequest = async (req: Request, res: Response) => {
 
   try {
     // Validate required fields
-    if (!username || !tokenIn || !tokenOut || !amountIn) {
+    if (!tokenIn || !tokenOut || !amountIn) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
-        message: "Username, tokenIn, tokenOut, and amountIn are required",
+        message: "tokenIn, tokenOut, and amountIn are required",
       });
     }
 
-    // Find user and verify wallet address exists
-    const user = await User.findOne({ username }).select("+encryptedPrivateKey").session(session);
+    // Resolve token symbols to addresses if needed
+    let resolvedTokenIn = tokenIn;
+    let resolvedTokenOut = tokenOut;
+    
+    // Try to resolve tokenIn as symbol first
+    const tokenInBySymbol = getTokenBySymbol(tokenIn);
+    if (tokenInBySymbol) {
+      // For native BNB, use WBNB address (0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c) for swaps
+      resolvedTokenIn = tokenInBySymbol.address === 'native' 
+        ? '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' // WBNB address for 0x
+        : tokenInBySymbol.address;
+    } else {
+      // If not a symbol, check if it's already an address
+      const tokenInByAddress = getTokenByAddress(tokenIn);
+      if (!tokenInByAddress) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          message: `Invalid tokenIn: "${tokenIn}". Must be a supported token symbol (MARS, BNB, WKC, DTG, YUKAN, TWD, TKC, ETH, USDT) or a valid contract address`,
+        });
+      }
+      // If it's a native indicator, convert to WBNB address
+      if (NATIVE_BNB_INDICATORS.includes(tokenIn.toLowerCase())) {
+        resolvedTokenIn = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+      }
+    }
+    
+    // Try to resolve tokenOut as symbol first
+    const tokenOutBySymbol = getTokenBySymbol(tokenOut);
+    if (tokenOutBySymbol) {
+      // For native BNB, use WBNB address (0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c) for swaps
+      resolvedTokenOut = tokenOutBySymbol.address === 'native'
+        ? '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' // WBNB address for 0x
+        : tokenOutBySymbol.address;
+    } else {
+      // If not a symbol, check if it's already an address
+      const tokenOutByAddress = getTokenByAddress(tokenOut);
+      if (!tokenOutByAddress) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          message: `Invalid tokenOut: "${tokenOut}". Must be a supported token symbol (MARS, BNB, WKC, DTG, YUKAN, TWD, TKC, ETH, USDT) or a valid contract address`,
+        });
+      }
+      // If it's a native indicator, convert to WBNB address
+      if (NATIVE_BNB_INDICATORS.includes(tokenOut.toLowerCase())) {
+        resolvedTokenOut = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+      }
+    }
+
+    // Find user by ID from JWT token and verify wallet address exists
+    const user = await User.findById(req.user.id).select("+encryptedPrivateKey").session(session);
     if (!user) {
       await session.abortTransaction();
       session.endSession();
@@ -78,10 +135,13 @@ export const createSwapRequest = async (req: Request, res: Response) => {
 
     const feeAmount = (amountInNum * feePercentage) / 100;
     const feeAmountString = feeAmount.toFixed(18); // Use high precision for token amounts
+    
+    // Calculate actual swap amount (amountIn - feeAmount)
+    const actualSwapAmount = (amountInNum - feeAmount).toFixed(18);
 
     // Calculate deadline - since swap executes immediately, use a short deadline (5 minutes)
     // This protects against network delays while still allowing immediate execution
-    // Deadline is required by PancakeSwap Router V4 contract
+    // Note: 0x API handles deadline internally, but we keep this for consistency
     let swapDeadline = deadline || Math.floor(Date.now() / 1000) + 300; // Default 5 minutes
     
     // Validate deadline is not in the past and is reasonable (max 1 hour)
@@ -103,34 +163,52 @@ export const createSwapRequest = async (req: Request, res: Response) => {
     
     const swapSlippage = slippageTolerance || 1.0;
 
+    // Get token symbols if not provided
+    const tokenInInfo = getTokenByAddress(resolvedTokenIn) || getTokenBySymbol(tokenIn);
+    const tokenOutInfo = getTokenByAddress(resolvedTokenOut) || getTokenBySymbol(tokenOut);
+    const finalTokenInSymbol = tokenInSymbol || tokenInInfo?.symbol || "";
+    const finalTokenOutSymbol = tokenOutSymbol || tokenOutInfo?.symbol || "";
+
     // Get swap quote to determine amountOutMin if not provided
+    // IMPORTANT: Use actualSwapAmount (after fee deduction) for the quote, not the original amountIn
     let calculatedAmountOutMin = amountOutMin;
     if (!calculatedAmountOutMin && amountOut) {
       // Calculate minimum based on slippage tolerance
       const amountOutNum = parseFloat(amountOut);
       calculatedAmountOutMin = (amountOutNum * (100 - swapSlippage) / 100).toFixed(18);
     } else if (!calculatedAmountOutMin) {
-      // Try to get quote from PancakeSwap
+      // Try to get quote from 0x using the actual swap amount (after fee)
       try {
-        const quote = await getSwapQuote(tokenIn, tokenOut, amountIn);
+        const quote = await getZeroExQuote(resolvedTokenIn, resolvedTokenOut, actualSwapAmount, user.walletAddress, swapSlippage);
         const quoteAmountOut = parseFloat(quote.amountOut);
         calculatedAmountOutMin = (quoteAmountOut * (100 - swapSlippage) / 100).toFixed(18);
       } catch (quoteError) {
+        const errorMessage = quoteError instanceof Error ? quoteError.message : 'Unknown error';
+        // If no routes are found, fail early instead of proceeding
+        if (errorMessage.includes('No swap routes available') || errorMessage.includes('No routes found') || errorMessage.includes('validation errors')) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            message: errorMessage,
+            error: 'NO_ROUTES_AVAILABLE',
+          });
+        }
         console.warn('Could not get swap quote, proceeding without amountOutMin:', quoteError);
         calculatedAmountOutMin = "0";
       }
     }
 
     // Create swap request with processing status
+    // Note: amountIn stored is the original amount, but actual swap uses actualSwapAmount (after fee)
     const swapRequest = new SwapRequest({
       userId: user._id,
       walletAddress: user.walletAddress,
       chain: "BSC",
-      tokenIn: tokenIn.toLowerCase(),
-      tokenOut: tokenOut.toLowerCase(),
-      tokenInSymbol: tokenInSymbol || "",
-      tokenOutSymbol: tokenOutSymbol || "",
-      amountIn: amountIn,
+      tokenIn: resolvedTokenIn.toLowerCase(),
+      tokenOut: resolvedTokenOut.toLowerCase(),
+      tokenInSymbol: finalTokenInSymbol,
+      tokenOutSymbol: finalTokenOutSymbol,
+      amountIn: actualSwapAmount, // Store the actual swap amount (after fee deduction)
       amountOut: amountOut || "",
       amountOutMin: calculatedAmountOutMin,
       feePercentage: feePercentage,
@@ -162,11 +240,11 @@ export const createSwapRequest = async (req: Request, res: Response) => {
         username: user.username,
         walletAddress: user.walletAddress,
         amount: amountIn,
-        tokenAddress: tokenIn,
+        tokenAddress: resolvedTokenIn,
         ipAddress: clientIP,
       });
 
-      swapResult = await executeBSCSwap({
+      swapResult = await executeZeroExSwap({
         tokenIn: swapRequest.tokenIn,
         tokenOut: swapRequest.tokenOut,
         amountIn: swapRequest.amountIn,
@@ -174,7 +252,6 @@ export const createSwapRequest = async (req: Request, res: Response) => {
         walletAddress: swapRequest.walletAddress,
         encryptedPrivateKey: user.encryptedPrivateKey,
         slippageTolerance: swapRequest.slippageTolerance,
-        deadline: swapRequest.deadline,
         feeRecipientAddress: swapRequest.feeRecipientAddress,
         feeAmount: swapRequest.feeAmount, // Pass fee amount for collection
       });
@@ -195,7 +272,16 @@ export const createSwapRequest = async (req: Request, res: Response) => {
           const receipt = await provider.getTransactionReceipt(swapResult.transactionHash);
           
           if (receipt) {
+            // Check transaction status (0 = failed/reverted, 1 = success)
+            // receipt.status is a number: 0 for failed, 1 for success
+            const transactionStatus = receipt.status === 1 ? "confirmed" : "failed";
             const gasFee = receipt.gasUsed * (receipt.gasPrice || BigInt(0));
+            
+            // If transaction failed, update swap request status
+            if (transactionStatus === "failed") {
+              swapRequest.status = "failed";
+              await swapRequest.save();
+            }
             
             await createTransaction({
               userId: user._id.toString(),
@@ -215,10 +301,10 @@ export const createSwapRequest = async (req: Request, res: Response) => {
               gasUsed: receipt.gasUsed.toString(),
               gasPrice: receipt.gasPrice?.toString(),
               gasFee: ethers.formatEther(gasFee),
-              status: "confirmed",
+              status: transactionStatus,
               confirmations: 1,
               transactionTimestamp: new Date(),
-              confirmedAt: new Date(),
+              confirmedAt: transactionStatus === "confirmed" ? new Date() : undefined,
               swapRequestId: swapRequest._id.toString(),
             });
           }
@@ -328,19 +414,13 @@ export const createSwapRequest = async (req: Request, res: Response) => {
 };
 
 export const getUserSwapRequests = async (req: Request, res: Response) => {
-  const { username } = req.query;
+  // Get user from JWT token (set by authenticateToken middleware)
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized: User not authenticated" });
+  }
 
   try {
-    if (!username) {
-      return res.status(400).json({ message: "Username is required" });
-    }
-
-    const user = await User.findOne({ username });
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const swapRequests = await SwapRequest.find({ userId: user._id })
+    const swapRequests = await SwapRequest.find({ userId: req.user.id })
       .sort({ createdAt: -1 })
       .lean();
 
