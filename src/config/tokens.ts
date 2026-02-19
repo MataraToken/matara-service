@@ -123,7 +123,7 @@ export function getTokenByAddress(address: string): TokenInfo | null {
   }
   
   return null;
-}
+};
 
 /**
  * Get token info by symbol (case-insensitive)
