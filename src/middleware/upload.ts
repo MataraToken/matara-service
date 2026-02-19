@@ -1,11 +1,16 @@
 import multer, { StorageEngine, FileFilterCallback } from 'multer';
 import { Request } from 'express';
 
+// Minimal type for multer file in fileFilter (avoids Express.Multer namespace issues)
+interface MulterFile {
+  mimetype: string;
+}
+
 // Define the storage engine
 const storage: StorageEngine = multer.diskStorage({});
 
 // Define the file filter
-const fileFilter = (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+const fileFilter = (req: Request, file: MulterFile, cb: FileFilterCallback) => {
     if (!file.mimetype.includes('image')) {
         return cb(new Error("Invalid image format!")  as unknown as null, false);
     }
