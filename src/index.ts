@@ -169,13 +169,13 @@ server.listen(port, async () => {
   // Set up bot after server is ready
   await setupBot();
   
-  // Start deposit listener
-  try {
-    await startDepositListener();
-    console.log("✅ Deposit listener started");
-  } catch (error) {
-    console.error("❌ Failed to start deposit listener:", error);
-  }
+  // Deposit listener disabled for now
+  // try {
+  //   await startDepositListener();
+  //   console.log("✅ Deposit listener started");
+  // } catch (error) {
+  //   console.error("❌ Failed to start deposit listener:", error);
+  // }
 });
 
 const gracefulShutdown = (signal: string) => {
@@ -183,7 +183,7 @@ const gracefulShutdown = (signal: string) => {
   
   // Stop deposit listener
   try {
-    stopDepositListener();
+    // stopDepositListener();
     console.log("Deposit listener stopped");
   } catch (error) {
     console.error("Error stopping deposit listener:", error);
