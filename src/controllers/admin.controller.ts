@@ -199,6 +199,74 @@ export const getTasks = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Admin: mark a task as ended — no new submissions until reopened.
+ */
+export const endTask = async (req: Request, res: Response) => {
+  try {
+    const rawSlug = req.params.slug;
+    const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
+    if (!slug) {
+      return res.status(400).json({ message: "Task slug is required" });
+    }
+
+    const task = await Task.findOne({ slug });
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (task.status === "ended") {
+      return res.status(400).json({ message: "Task is already ended" });
+    }
+
+    task.status = "ended";
+    task.endedAt = new Date();
+    await task.save();
+
+    return res.status(200).json({
+      message: "Task ended successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Error ending task:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Admin: reopen an ended task so users can submit again.
+ */
+export const reopenTask = async (req: Request, res: Response) => {
+  try {
+    const rawSlug = req.params.slug;
+    const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
+    if (!slug) {
+      return res.status(400).json({ message: "Task slug is required" });
+    }
+
+    const task = await Task.findOne({ slug });
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (task.status !== "ended") {
+      return res.status(400).json({ message: "Task is not ended" });
+    }
+
+    task.status = "active";
+    task.endedAt = null;
+    await task.save();
+
+    return res.status(200).json({
+      message: "Task reopened successfully",
+      data: task,
+    });
+  } catch (error) {
+    console.error("Error reopening task:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const deleteTask = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;

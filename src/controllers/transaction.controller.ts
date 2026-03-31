@@ -48,7 +48,8 @@ export const getUserTransactionsController = async (req: Request, res: Response)
 
 export const getTransactionByHashController = async (req: Request, res: Response) => {
   try {
-    const { transactionHash } = req.params;
+    const rawTransactionHash = req.params.transactionHash;
+    const transactionHash = Array.isArray(rawTransactionHash) ? rawTransactionHash[0] : rawTransactionHash;
 
     if (!transactionHash) {
       return res.status(400).json({ message: "Transaction hash is required" });
@@ -72,7 +73,8 @@ export const getTransactionByHashController = async (req: Request, res: Response
 
 export const getTransactionsByWalletController = async (req: Request, res: Response) => {
   try {
-    const { walletAddress } = req.params;
+    const rawWalletAddress = req.params.walletAddress;
+    const walletAddress = Array.isArray(rawWalletAddress) ? rawWalletAddress[0] : rawWalletAddress;
     const { type, status, limit, page } = req.query;
 
     if (!walletAddress) {
@@ -138,7 +140,8 @@ export const backfillSwapTransactionsController = async (req: Request, res: Resp
 
 export const backfillWalletTransactionsController = async (req: Request, res: Response) => {
   try {
-    const { walletAddress } = req.params;
+    const rawWalletAddress = req.params.walletAddress;
+    const walletAddress = Array.isArray(rawWalletAddress) ? rawWalletAddress[0] : rawWalletAddress;
     const { startBlock, endBlock, maxTransactions } = req.query;
 
     if (!walletAddress) {

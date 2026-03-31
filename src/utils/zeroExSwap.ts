@@ -588,6 +588,15 @@ export async function executeZeroExSwap(params: ZeroExSwapParams): Promise<ZeroE
     const amountOut = ethers.formatUnits(quote.buyAmount, tokenOutDecimals);
     console.log(`Fresh quote: ${actualSwapAmount} -> ${amountOut}`);
 
+    const sellTokenContract = new ethers.Contract(
+      sellToken,
+      [
+        'function allowance(address owner, address spender) view returns (uint256)',
+        'function balanceOf(address owner) view returns (uint256)',
+      ],
+      provider
+    );
+
     // Step 6: Handle Permit2 if required (Fix #3)
     let permit2Signature: string | null = null;
     if (quote.permit2) {
@@ -596,12 +605,10 @@ export async function executeZeroExSwap(params: ZeroExSwapParams): Promise<ZeroE
         
         // Approve Permit2 contract if needed. sellToken is always an ERC20 here
         // (WBNB when user sells native BNB—we wrap first—or another token).
-        const currentAllowanceForPermit2 = await publicClient.readContract({
-          address: sellToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [walletAddress as `0x${string}`, PERMIT2_ADDRESS as `0x${string}`],
-        });
+        const currentAllowanceForPermit2 = await sellTokenContract.allowance(
+          walletAddress,
+          PERMIT2_ADDRESS
+        );
         
         if (currentAllowanceForPermit2 < sellAmount) {
           console.log('Approving Permit2 to spend tokens...');
@@ -634,15 +641,10 @@ export async function executeZeroExSwap(params: ZeroExSwapParams): Promise<ZeroE
       // Standard approval flow (non-Permit2)
       try {
         // Check current allowance using public client
-        const currentAllowance = await publicClient.readContract({
-          address: sellToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [
-            walletAddress as `0x${string}`,
-            quote.allowanceTarget as `0x${string}`,
-          ],
-        });
+        const currentAllowance = await sellTokenContract.allowance(
+          walletAddress,
+          quote.allowanceTarget as `0x${string}`
+        );
 
         if (currentAllowance < sellAmount) {
           console.log('Approving 0x AllowanceTarget to spend tokens...');
@@ -668,15 +670,10 @@ export async function executeZeroExSwap(params: ZeroExSwapParams): Promise<ZeroE
           console.log('Approval transaction confirmed:', approveHash);
           
           // Re-verify allowance after approval
-          const newAllowance = await publicClient.readContract({
-            address: sellToken as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [
-              walletAddress as `0x${string}`,
-              quote.allowanceTarget as `0x${string}`,
-            ],
-          });
+          const newAllowance = await sellTokenContract.allowance(
+            walletAddress,
+            quote.allowanceTarget as `0x${string}`
+          );
           
           if (newAllowance < sellAmount) {
             return {
@@ -699,12 +696,7 @@ export async function executeZeroExSwap(params: ZeroExSwapParams): Promise<ZeroE
     
     // Re-check balance right before execution (after approval if it happened).
     // sellToken is always an ERC20 here (WBNB for native BNB after wrap, or another token).
-    const finalBalance = await publicClient.readContract({
-      address: sellToken as `0x${string}`,
-      abi: erc20Abi,
-      functionName: 'balanceOf',
-      args: [walletAddress as `0x${string}`],
-    });
+    const finalBalance = await sellTokenContract.balanceOf(walletAddress);
     
     if (finalBalance < sellAmount) {
       return {

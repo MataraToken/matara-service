@@ -37,6 +37,16 @@ const taskSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    /** When `ended`, users cannot submit new completions (dashboard can end tasks manually). */
+    status: {
+      type: String,
+      enum: ["active", "ended"],
+      default: "active",
+    },
+    endedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

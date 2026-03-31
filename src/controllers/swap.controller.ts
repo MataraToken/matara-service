@@ -451,7 +451,8 @@ export const getUserSwapRequests = async (req: Request, res: Response) => {
 };
 
 export const getSwapRequest = async (req: Request, res: Response) => {
-  const { swapRequestId } = req.params;
+  const rawSwapRequestId = req.params.swapRequestId;
+  const swapRequestId = Array.isArray(rawSwapRequestId) ? rawSwapRequestId[0] : rawSwapRequestId;
 
   try {
     if (!mongoose.Types.ObjectId.isValid(swapRequestId)) {
@@ -477,7 +478,8 @@ export const getSwapRequest = async (req: Request, res: Response) => {
 };
 
 export const updateSwapRequestStatus = async (req: Request, res: Response) => {
-  const { swapRequestId } = req.params;
+  const rawSwapRequestId = req.params.swapRequestId;
+  const swapRequestId = Array.isArray(rawSwapRequestId) ? rawSwapRequestId[0] : rawSwapRequestId;
   const { status, transactionHash, amountOut, errorMessage } = req.body;
 
   const session = await mongoose.startSession();

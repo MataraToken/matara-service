@@ -82,7 +82,8 @@ export const getTask = async (req: Request, res: Response) => {
 
 export const getTasksByProjectId = async (req: Request, res: Response) => {
   try {
-    const { projectId } = req.params;
+    const rawProjectId = req.params.projectId;
+    const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
     const { username } = req.query;
 
     // Validate projectId format
@@ -242,6 +243,14 @@ export const completeTask = async (req: Request, res: Response) => {
       await session.abortTransaction();
       session.endSession();
       return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (task.status === "ended") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({
+        message: "This task has ended and no longer accepts submissions.",
+      });
     }
 
     // Get user from JWT token

@@ -2,6 +2,8 @@ import { Router } from "express";
 import { 
   createTask, 
   deleteTask, 
+  endTask,
+  reopenTask,
   getTasks, 
   getUsers, 
   loginAdmin, 
@@ -33,6 +35,8 @@ router.get("/users", isAdmin, adminIPWhitelist(adminIPs), getUsers);
 router.get("/project/:projectId/tasks", isAdmin, adminIPWhitelist(adminIPs), getTasksByProjectId);
 router.delete("/tasks/:slug", isAdmin, adminIPWhitelist(adminIPs), deleteTask);
 router.put("/tasks/:slug", isAdmin, adminIPWhitelist(adminIPs), upload.single("icon"), updateTask);
+router.post("/tasks/:slug/end", isAdmin, adminIPWhitelist(adminIPs), endTask);
+router.post("/tasks/:slug/reopen", isAdmin, adminIPWhitelist(adminIPs), reopenTask);
 
 // Task submission review routes
 router.get("/task-submissions", isAdmin, adminIPWhitelist(adminIPs), getTaskSubmissionsForReview);
