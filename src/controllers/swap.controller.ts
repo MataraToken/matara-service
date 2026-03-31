@@ -3,6 +3,7 @@ import User from "../model/user.model";
 import SwapRequest from "../model/swapRequest.model";
 import mongoose from "mongoose";
 import { executeZeroExSwap, getZeroExQuote } from "../utils/zeroExSwap";
+import { executeOneInchSwap, getOneInchQuote } from "../utils/oneInchSwap";
 import { createTransaction } from "../services/transaction.service";
 import { ethers } from "ethers";
 import { logWalletOperation } from "../services/audit.service";
@@ -177,15 +178,17 @@ export const createSwapRequest = async (req: Request, res: Response) => {
       const amountOutNum = parseFloat(amountOut);
       calculatedAmountOutMin = (amountOutNum * (100 - swapSlippage) / 100).toFixed(18);
     } else if (!calculatedAmountOutMin) {
-      // Try to get quote from 0x using the actual swap amount (after fee)
+      // Try to get quote (0x or 1inch based on SWAP_PROVIDER)
+      const swapProvider = (process.env.SWAP_PROVIDER || '0x').toLowerCase();
       try {
-        const quote = await getZeroExQuote(resolvedTokenIn, resolvedTokenOut, actualSwapAmount, user.walletAddress, swapSlippage);
+        const quote = swapProvider === '1inch'
+          ? await getOneInchQuote(resolvedTokenIn, resolvedTokenOut, actualSwapAmount, user.walletAddress, swapSlippage)
+          : await getZeroExQuote(resolvedTokenIn, resolvedTokenOut, actualSwapAmount, user.walletAddress, swapSlippage);
         const quoteAmountOut = parseFloat(quote.amountOut);
         calculatedAmountOutMin = (quoteAmountOut * (100 - swapSlippage) / 100).toFixed(18);
       } catch (quoteError) {
         const errorMessage = quoteError instanceof Error ? quoteError.message : 'Unknown error';
-        // If no routes are found, fail early instead of proceeding
-        if (errorMessage.includes('No swap routes available') || errorMessage.includes('No routes found') || errorMessage.includes('validation errors')) {
+        if (errorMessage.includes('No swap routes available') || errorMessage.includes('No routes found') || errorMessage.includes('validation errors') || errorMessage.includes('1inch API')) {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({
@@ -244,17 +247,30 @@ export const createSwapRequest = async (req: Request, res: Response) => {
         ipAddress: clientIP,
       });
 
-      swapResult = await executeZeroExSwap({
-        tokenIn: swapRequest.tokenIn,
-        tokenOut: swapRequest.tokenOut,
-        amountIn: swapRequest.amountIn,
-        amountOutMin: swapRequest.amountOutMin || "0",
-        walletAddress: swapRequest.walletAddress,
-        encryptedPrivateKey: user.encryptedPrivateKey,
-        slippageTolerance: swapRequest.slippageTolerance,
-        feeRecipientAddress: swapRequest.feeRecipientAddress,
-        feeAmount: swapRequest.feeAmount, // Pass fee amount for collection
-      });
+      const swapProvider = (process.env.SWAP_PROVIDER || '0x').toLowerCase();
+      swapResult = swapProvider === '1inch'
+        ? await executeOneInchSwap({
+            tokenIn: swapRequest.tokenIn,
+            tokenOut: swapRequest.tokenOut,
+            amountIn: swapRequest.amountIn,
+            amountOutMin: swapRequest.amountOutMin || "0",
+            walletAddress: swapRequest.walletAddress,
+            encryptedPrivateKey: user.encryptedPrivateKey,
+            slippageTolerance: swapRequest.slippageTolerance,
+            feeRecipientAddress: swapRequest.feeRecipientAddress,
+            feeAmount: swapRequest.feeAmount,
+          })
+        : await executeZeroExSwap({
+            tokenIn: swapRequest.tokenIn,
+            tokenOut: swapRequest.tokenOut,
+            amountIn: swapRequest.amountIn,
+            amountOutMin: swapRequest.amountOutMin || "0",
+            walletAddress: swapRequest.walletAddress,
+            encryptedPrivateKey: user.encryptedPrivateKey,
+            slippageTolerance: swapRequest.slippageTolerance,
+            feeRecipientAddress: swapRequest.feeRecipientAddress,
+            feeAmount: swapRequest.feeAmount,
+          });
 
       // Update swap request with transaction result
       if (swapResult.success && swapResult.transactionHash) {
