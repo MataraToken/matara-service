@@ -10,7 +10,17 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { compressLogo } from "../utils/imageCompression";
 import fs from "fs/promises";
-import { broadcastTelegramAnnouncement } from "../services/telegramAnnouncement.service";
+import { randomUUID } from "crypto";
+import path from "path";
+import {
+  broadcastTelegramAnnouncement,
+} from "../services/telegramAnnouncement.service";
+import {
+  enqueueTelegramBroadcast,
+  getBroadcastStagingDir,
+  getTelegramBroadcastQueue,
+  isRedisConfigured,
+} from "../queues/telegramBroadcast.queue";
 
 export const registerAdmin = async (req: Request, res: Response) => {
   const { username, password, firstName } = req.body;
@@ -610,6 +620,31 @@ export const sendBotAnnouncement = async (req: Request, res: Response) => {
         ? req.body.linkLabel.trim()
         : "Open link";
 
+    if (isRedisConfigured()) {
+      const jobId = randomUUID();
+      const stagingDir = getBroadcastStagingDir();
+      await fs.mkdir(stagingDir, { recursive: true });
+      const ext = path.extname(file.originalname || "") || ".img";
+      const dest = path.join(stagingDir, `${jobId}${ext}`);
+      await fs.rename(file.path, dest);
+
+      await enqueueTelegramBroadcast(
+        {
+          imagePath: dest,
+          text,
+          link,
+          linkLabel,
+        },
+        jobId
+      );
+
+      return res.status(202).json({
+        message: "Announcement queued; processing in background",
+        jobId,
+        pollUrl: `/api/admin/bot/announcement/jobs/${jobId}`,
+      });
+    }
+
     const result = await broadcastTelegramAnnouncement({
       text,
       coverImagePath: file.path,
@@ -630,6 +665,47 @@ export const sendBotAnnouncement = async (req: Request, res: Response) => {
     if (message.includes("link must be")) {
       return res.status(400).json({ message });
     }
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Admin: poll BullMQ job status for a queued Telegram announcement (requires REDIS_URL).
+ */
+export const getBotAnnouncementJobStatus = async (req: Request, res: Response) => {
+  try {
+    if (!isRedisConfigured()) {
+      return res.status(503).json({
+        message: "Job status is only available when REDIS_URL is configured",
+      });
+    }
+
+    const rawId = req.params.jobId;
+    const jobId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!jobId) {
+      return res.status(400).json({ message: "jobId is required" });
+    }
+
+    const queue = getTelegramBroadcastQueue();
+    const job = await queue.getJob(jobId);
+    if (!job) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+
+    const state = await job.getState();
+    const progress = job.progress;
+    const returnvalue = job.returnvalue;
+    const failedReason = job.failedReason;
+
+    return res.status(200).json({
+      jobId,
+      state,
+      progress,
+      result: returnvalue ?? null,
+      failedReason: failedReason ?? null,
+    });
+  } catch (error) {
+    console.error("getBotAnnouncementJobStatus error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

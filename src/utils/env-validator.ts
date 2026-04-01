@@ -28,6 +28,8 @@ const optionalEnvVars: { [key: string]: string | undefined } = {
   LOG_LEVEL: 'info',
   NODE_ENV: 'development',
   PORT: '4000',
+  /** BullMQ + ioredis: enables async Telegram announcement queue (see docs) */
+  REDIS_URL: undefined,
 };
 
 /**

@@ -1,10 +1,15 @@
 import { Markup } from "telegraf";
+import type { InlineKeyboardMarkup } from "telegraf/types";
 import bot from "../bot";
 import User from "../model/user.model";
 
 const CAPTION_MAX = 1024;
 const BUTTON_LABEL_MAX = 64;
-const DELAY_MS = 40;
+
+/** Parallel sends per batch (Telegram allows ~30 msgs/s to different chats; stay conservative). */
+const DEFAULT_CONCURRENCY = Number(process.env.TELEGRAM_BROADCAST_CONCURRENCY || "10");
+/** Pause after each batch finishes (ms) to avoid sustained bursts. */
+const DEFAULT_BATCH_DELAY_MS = Number(process.env.TELEGRAM_BROADCAST_BATCH_DELAY_MS || "200");
 
 export interface BroadcastAnnouncementInput {
   text: string;
@@ -29,11 +34,70 @@ function isValidHttpUrl(url: string): boolean {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function getRetryAfterSeconds(err: unknown): number | null {
+  const e = err as {
+    response?: { error_code?: number; parameters?: { retry_after?: number } };
+  };
+  if (e?.response?.error_code === 429) {
+    const sec = e.response.parameters?.retry_after;
+    return typeof sec === "number" && sec > 0 ? sec : 2;
+  }
+  return null;
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
+async function sendPhotoToChat(
+  chatId: number,
+  coverImagePath: string,
+  caption: string,
+  reply_markup: InlineKeyboardMarkup | undefined
+): Promise<void> {
+  try {
+    await bot.telegram.sendPhoto(
+      chatId,
+      { source: coverImagePath },
+      {
+        caption,
+        ...(reply_markup ? { reply_markup } : {}),
+      }
+    );
+  } catch (first: unknown) {
+    const waitSec = getRetryAfterSeconds(first);
+    if (waitSec != null) {
+      await sleep(waitSec * 1000 + 200);
+      await bot.telegram.sendPhoto(
+        chatId,
+        { source: coverImagePath },
+        {
+          caption,
+          ...(reply_markup ? { reply_markup } : {}),
+        }
+      );
+      return;
+    }
+    throw first;
+  }
+}
+
 /**
  * Sends a photo + caption to every user with a stored Telegram chat id (Blum-style announcement).
+ * Uses batched parallelism + optional 429 retry to finish faster than strict serial sends.
+ * @param onProgress Optional 0–100 for queue / UI progress.
  */
 export async function broadcastTelegramAnnouncement(
-  input: BroadcastAnnouncementInput
+  input: BroadcastAnnouncementInput,
+  onProgress?: (percent: number) => void | Promise<void>
 ): Promise<BroadcastAnnouncementResult> {
   const { text, coverImagePath, link, linkLabel = "Open link" } = input;
 
@@ -50,42 +114,62 @@ export async function broadcastTelegramAnnouncement(
     .select("telegramChatId username")
     .lean();
 
-  const reply_markup = link
-    ? Markup.inlineKeyboard([Markup.button.url(buttonText, link)]).reply_markup
+  const reply_markup: InlineKeyboardMarkup | undefined = link
+    ? (Markup.inlineKeyboard([Markup.button.url(buttonText, link)]).reply_markup as InlineKeyboardMarkup)
     : undefined;
+
+  const targets = users.filter(
+    (u): u is (typeof u & { telegramChatId: number }) => u.telegramChatId != null
+  );
+
+  const concurrency = Math.max(1, Math.min(30, DEFAULT_CONCURRENCY || 10));
+  const batchDelayMs = Math.max(0, DEFAULT_BATCH_DELAY_MS || 0);
 
   let sent = 0;
   let failed = 0;
   const sampleErrors: string[] = [];
 
-  for (const u of users) {
-    const chatId = u.telegramChatId;
-    if (chatId == null) continue;
+  const batches = chunk(targets, concurrency);
+  const total = targets.length;
+  await onProgress?.(0);
 
-    try {
-      await bot.telegram.sendPhoto(
-        chatId,
-        { source: coverImagePath },
-        {
-          caption,
-          ...(reply_markup ? { reply_markup } : {}),
+  for (let b = 0; b < batches.length; b++) {
+    const batch = batches[b];
+    const results = await Promise.allSettled(
+      batch.map((u) =>
+        sendPhotoToChat(u.telegramChatId, coverImagePath, caption, reply_markup)
+      )
+    );
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const u = batch[i];
+      const chatId = u.telegramChatId;
+
+      if (r.status === "fulfilled") {
+        sent++;
+      } else {
+        failed++;
+        const msg = r.reason?.response?.description || r.reason?.message || String(r.reason);
+        if (sampleErrors.length < 25) {
+          sampleErrors.push(`${u.username ?? chatId}: ${msg}`);
         }
-      );
-      sent++;
-    } catch (e: unknown) {
-      failed++;
-      const err = e as { response?: { description?: string }; message?: string };
-      const msg = err?.response?.description || err?.message || String(e);
-      if (sampleErrors.length < 25) {
-        sampleErrors.push(`${u.username ?? chatId}: ${msg}`);
       }
     }
 
-    await new Promise((r) => setTimeout(r, DELAY_MS));
+    if (batchDelayMs > 0 && b < batches.length - 1) {
+      await sleep(batchDelayMs);
+    }
+
+    const done = sent + failed;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 100;
+    await onProgress?.(pct);
   }
 
+  await onProgress?.(100);
+
   return {
-    totalTargets: users.length,
+    totalTargets: targets.length,
     sent,
     failed,
     sampleErrors,

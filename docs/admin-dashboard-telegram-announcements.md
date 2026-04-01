@@ -10,6 +10,9 @@ Send a **photo + caption** to every user who has opened your bot and completed `
 2. **Bot & server**  
    The announcement API uses the same `TELEGRAM_BOT_TOKEN` as the running bot process.
 
+3. **Optional: Redis for async queue**  
+   Set **`REDIS_URL`** (same format as ioredis, e.g. `redis://localhost:6379`) to enqueue broadcasts instead of blocking the HTTP request until every user is processed. Without Redis, the handler still works: it runs the broadcast **synchronously** and returns **`200`** when done.
+
 ## Endpoint
 
 ```http
@@ -27,7 +30,46 @@ Content-Type: multipart/form-data
 | `link`     | No       | If set, adds one **URL** button. Must be `http://` or `https://`. |
 | `linkLabel`| No       | Button label (default: `Open link`). Max **64** characters (Telegram limit). |
 
-### Success — `200 OK`
+### Success — queued (`REDIS_URL` set) — `202 Accepted`
+
+```json
+{
+  "message": "Announcement queued; processing in background",
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "pollUrl": "/api/admin/bot/announcement/jobs/550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Poll job status (same admin auth and IP rules as the POST):
+
+```http
+GET /api/admin/bot/announcement/jobs/:jobId
+Authorization: Bearer <admin_jwt>
+```
+
+Example response while running or after completion:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "state": "completed",
+  "progress": 100,
+  "result": {
+    "totalTargets": 120,
+    "sent": 118,
+    "failed": 2,
+    "sampleErrors": ["someuser: Forbidden: bot was blocked by the user"]
+  },
+  "failedReason": null
+}
+```
+
+- **`state`**: BullMQ job state (e.g. `waiting`, `active`, `completed`, `failed`).
+- **`progress`**: `0`–`100` while the worker reports batch progress.
+- **`result`**: same shape as the synchronous `data` object when the job completes successfully.
+- If Redis is not configured, this endpoint returns **`503`**.
+
+### Success — synchronous (no `REDIS_URL`) — `200 OK`
 
 ```json
 {
@@ -53,6 +95,8 @@ Content-Type: multipart/form-data
 |--------|------|
 | `400`  | Missing `cover` or `text`, or invalid `link` URL. |
 | `401` / `403` | Missing admin token or not admin. |
+| `404`  | (GET job status) Unknown `jobId`. |
+| `503`  | (GET job status) Redis not configured. |
 | `500`  | Server / Telegram error. |
 
 ## Example: `curl`
@@ -82,13 +126,19 @@ const res = await fetch(`${API}/api/admin/bot/announcement`, {
   headers: { Authorization: `Bearer ${token}` },
   body: form,
 });
+
+if (res.status === 202) {
+  const { jobId, pollUrl } = await res.json();
+  // Poll GET `${API}${pollUrl}` until state is completed or failed
+}
 ```
 
 Do **not** set `Content-Type` manually when using `FormData` in the browser (the boundary is set automatically).
 
 ## Behaviour notes
 
-- Sends are **sequential** with a short delay (~40ms) between chats to reduce Telegram rate-limit risk. Large audiences may take minutes; the HTTP request stays open until the broadcast finishes—consider timeouts on the admin UI or a future async job if needed.
+- With **`REDIS_URL`**, the upload is moved to a temp staging directory, a BullMQ job is added, and the API returns immediately; a worker (concurrency **1**) runs the same broadcast logic and deletes the image when done.
+- Sends are **batched** with configurable concurrency and delay (`TELEGRAM_BROADCAST_CONCURRENCY`, `TELEGRAM_BROADCAST_BATCH_DELAY_MS`) to reduce Telegram rate-limit risk. Without Redis, large audiences may take minutes and the HTTP request stays open until the broadcast finishes.
 - Users who **never** pressed `/start` after this deploy (or who never got `telegramChatId` saved) are **not** in the audience.
 - If a user **blocks** the bot, that send counts as `failed` and may appear in `sampleErrors`.
 

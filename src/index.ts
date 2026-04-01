@@ -29,6 +29,10 @@ import {
   requestTimeout,
 } from "./middleware/security";
 import { validateEnv } from "./utils/env-validator";
+import {
+  closeTelegramBroadcastQueue,
+  startTelegramBroadcastWorker,
+} from "./queues/telegramBroadcast.queue";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -168,7 +172,8 @@ server.listen(port, async () => {
   console.log(`🚀 Server listening on port ${port}`);
   // Set up bot after server is ready
   await setupBot();
-  
+  startTelegramBroadcastWorker();
+
   // Deposit listener disabled for now
   // try {
   //   await startDepositListener();
@@ -178,9 +183,15 @@ server.listen(port, async () => {
   // }
 });
 
-const gracefulShutdown = (signal: string) => {
+const gracefulShutdown = async (signal: string) => {
   console.log(`Received ${signal}, shutting down gracefully...`);
-  
+
+  try {
+    await closeTelegramBroadcastQueue();
+  } catch (error) {
+    console.error("Error closing Telegram broadcast queue:", error);
+  }
+
   // Stop deposit listener
   try {
     // stopDepositListener();
@@ -188,7 +199,7 @@ const gracefulShutdown = (signal: string) => {
   } catch (error) {
     console.error("Error stopping deposit listener:", error);
   }
-  
+
   // Only stop the bot if it's in polling mode
   if (botRunning && NODE_ENV !== "production") {
     try {
@@ -198,20 +209,20 @@ const gracefulShutdown = (signal: string) => {
       console.error("Error stopping bot:", error);
     }
   }
-  
+
   server.close(() => {
     console.log("Server closed");
     process.exit(0);
   });
-  
+
   setTimeout(() => {
     console.log("Force exit");
     process.exit(1);
   }, 10000);
 };
 
-process.once("SIGINT", () => gracefulShutdown("SIGINT"));
-process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.once("SIGINT", () => void gracefulShutdown("SIGINT"));
+process.once("SIGTERM", () => void gracefulShutdown("SIGTERM"));
 
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Promise Rejection:", err);
@@ -219,5 +230,5 @@ process.on("unhandledRejection", (err) => {
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
-  gracefulShutdown("UNCAUGHT_EXCEPTION");
+  void gracefulShutdown("UNCAUGHT_EXCEPTION");
 });

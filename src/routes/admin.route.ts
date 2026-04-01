@@ -12,6 +12,7 @@ import {
   getTaskSubmissionsForReview,
   reviewTaskSubmission,
   sendBotAnnouncement,
+  getBotAnnouncementJobStatus,
 } from "../controllers/admin.controller";
 import { isAdmin } from "../middleware/admin";
 import { taskValidator, validate } from "../middleware";
@@ -50,6 +51,12 @@ router.post(
   adminIPWhitelist(adminIPs),
   upload.single("cover"),
   sendBotAnnouncement
+);
+router.get(
+  "/bot/announcement/jobs/:jobId",
+  isAdmin,
+  adminIPWhitelist(adminIPs),
+  getBotAnnouncementJobStatus
 );
 
 export default router;
