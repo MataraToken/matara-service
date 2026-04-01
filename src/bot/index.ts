@@ -60,6 +60,35 @@ bot.catch((err, ctx) => {
   console.error(`Bot error for ${ctx.updateType}:`, err);
 });
 
+/**
+ * Store Telegram private chat id for any DB user with this Telegram @username.
+ * Runs before command handlers so /start still benefits; also covers users who message
+ * the bot without /start (they must open the chat at least once — Telegram never exposes chat id without an update).
+ */
+async function persistTelegramChatId(username: string, chatId: number): Promise<void> {
+  await axios.post(
+    `${serverUrl}/api/user/bot/sync-telegram-chat`,
+    { username, telegramChatId: chatId },
+    {
+      timeout: 15_000,
+      validateStatus: (s) => s === 200 || s === 404,
+    }
+  );
+}
+
+bot.use(async (ctx, next) => {
+  if (ctx.chat?.type !== "private") return next();
+  const username = ctx.from?.username;
+  const chatId = ctx.chat?.id;
+  if (!username || chatId == null) return next();
+  try {
+    await persistTelegramChatId(username, chatId);
+  } catch (e) {
+    console.error("persistTelegramChatId (middleware):", e);
+  }
+  return next();
+});
+
 // Start command
 bot.start(async (ctx) => {
   try { 

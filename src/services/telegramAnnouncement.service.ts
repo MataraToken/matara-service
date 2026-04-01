@@ -122,6 +122,14 @@ export async function broadcastTelegramAnnouncement(
     (u): u is (typeof u & { telegramChatId: number }) => u.telegramChatId != null
   );
 
+  if (targets.length === 0) {
+    console.warn(
+      "[telegram broadcast] 0 recipients: no User documents have telegramChatId. " +
+        "Recipients are added when someone opens the bot, has a Telegram username, and /start runs " +
+        "(POST /api/user/register with telegramChatId). Check MongoDB is the same DB your bot registers against."
+    );
+  }
+
   const concurrency = Math.max(1, Math.min(30, DEFAULT_CONCURRENCY || 10));
   const batchDelayMs = Math.max(0, DEFAULT_BATCH_DELAY_MS || 0);
 

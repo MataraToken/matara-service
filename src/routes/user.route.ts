@@ -1,9 +1,10 @@
 const router = require("express").Router();
 import { getLeaderBoard, getUserPoint } from "../controllers/point.controller";
-import { getReferredUsers, getUser, getUsers, registerUser, saveOnboarding, userRanking, getSupportedTokens, getCurrentUser } from "../controllers/user.controller";
+import { getReferredUsers, getUser, getUsers, registerUser, syncTelegramChatFromBot, saveOnboarding, userRanking, getSupportedTokens, getCurrentUser } from "../controllers/user.controller";
 import { authenticateToken } from "../middleware/auth";
 
 router.post("/register", registerUser);
+router.post("/bot/sync-telegram-chat", syncTelegramChatFromBot);
 router.get("/", getUsers);
 router.get("/get-user", getUser); // Public: lookup any user by username
 router.get("/me", authenticateToken, getCurrentUser); // Authenticated: get current user from JWT

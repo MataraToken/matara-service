@@ -35,6 +35,9 @@ export const generalRateLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) =>
+    req.method === "POST" &&
+    req.originalUrl.split("?")[0] === "/api/user/bot/sync-telegram-chat",
 });
 
 /**

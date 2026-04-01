@@ -5,6 +5,14 @@ import Point from "../model/points.model";
 import mongoose from "mongoose";
 import { getAllSupportedTokens } from "../config/tokens";
 
+/** Accepts number or string from JSON; rejects non-integers. */
+function parseTelegramChatId(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  return n;
+}
+
 export const registerUser = async (req: Request, res: Response) => {
   const { username, referralCode, premium, profilePicture, firstName, telegramChatId } = req.body;
 
@@ -16,22 +24,21 @@ export const registerUser = async (req: Request, res: Response) => {
     if (alreadyExists) {
       await session.abortTransaction();
       session.endSession();
-      if (telegramChatId != null && telegramChatId !== "") {
-        const tid = Number(telegramChatId);
-        if (!Number.isNaN(tid)) {
-          await User.updateOne({ username }, { $set: { telegramChatId: tid } });
-        }
+      const tid = parseTelegramChatId(telegramChatId);
+      if (tid != null) {
+        await User.updateOne({ username }, { $set: { telegramChatId: tid } });
       }
       return res.status(200).json({ message: "Username already exists" });
     }
 
     const newReferralId = generateReferralCode();
-    
+    const parsedChatId = parseTelegramChatId(telegramChatId);
+
     // Generate BSC wallet for the user
     const wallet = generateBSCWallet();
     const encryptionPassword = process.env.WALLET_ENCRYPTION_PASSWORD || 'default-encryption-key';
     const encryptedPrivateKey = encryptPrivateKey(wallet.privateKey, encryptionPassword);
-    
+
     const newUser = new User({
       username,
       referralCode: newReferralId,
@@ -40,9 +47,7 @@ export const registerUser = async (req: Request, res: Response) => {
       firstName,
       walletAddress: wallet.address,
       encryptedPrivateKey,
-      ...(telegramChatId != null && telegramChatId !== "" && !Number.isNaN(Number(telegramChatId))
-        ? { telegramChatId: Number(telegramChatId) }
-        : {}),
+      ...(parsedChatId != null ? { telegramChatId: parsedChatId } : {}),
     });
 
     const initialPoints = 100;
@@ -75,6 +80,41 @@ export const registerUser = async (req: Request, res: Response) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error registering user:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Called by the Telegram bot on any private chat activity so existing app users
+ * get `telegramChatId` stored even if they never hit /start again (or already existed before).
+ * Does not create users — only updates a row that matches `username`.
+ */
+export const syncTelegramChatFromBot = async (req: Request, res: Response) => {
+  try {
+    const { username, telegramChatId } = req.body;
+    if (typeof username !== "string" || !username.trim()) {
+      return res.status(400).json({ message: "username is required" });
+    }
+    const tid = parseTelegramChatId(telegramChatId);
+    if (tid == null) {
+      return res.status(400).json({ message: "telegramChatId is required" });
+    }
+
+    const result = await User.updateOne(
+      { username: username.trim() },
+      { $set: { telegramChatId: tid } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.status(200).json({
+      message: "Telegram chat id stored",
+      updated: result.modifiedCount > 0,
+    });
+  } catch (error) {
+    console.error("syncTelegramChatFromBot error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

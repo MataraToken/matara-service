@@ -37,6 +37,23 @@ import {
 const app = express();
 const port = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || "development";
+
+// Behind Render/nginx/etc. the proxy sets X-Forwarded-For; express-rate-limit v8 requires this.
+// Set TRUST_PROXY=0 if Node is exposed directly with no trusted proxy (spoofing risk if mis-set).
+{
+  const raw = process.env.TRUST_PROXY?.trim().toLowerCase();
+  if (raw === "false" || raw === "0") {
+    // leave Express default (trust proxy off)
+  } else if (raw && raw !== "true") {
+    const n = parseInt(process.env.TRUST_PROXY!, 10);
+    if (Number.isFinite(n) && n > 0) {
+      app.set("trust proxy", n);
+    }
+  } else if (raw === "true" || NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+}
+
 const RENDER_URL = process.env.SERVER_URL;
 const TELEGRAM_WEBHOOK_PATH = process.env.BOT_WEBHOOK_PATH;
 
