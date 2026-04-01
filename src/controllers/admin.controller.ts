@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { compressLogo } from "../utils/imageCompression";
 import fs from "fs/promises";
+import { broadcastTelegramAnnouncement } from "../services/telegramAnnouncement.service";
 
 export const registerAdmin = async (req: Request, res: Response) => {
   const { username, password, firstName } = req.body;
@@ -577,5 +578,58 @@ export const reviewTaskSubmission = async (req: Request, res: Response) => {
     session.endSession();
     console.error("Error reviewing task submission:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Admin: broadcast an announcement to all Telegram users who /start'ed the bot (have telegramChatId).
+ * Multipart: field `cover` = image, `text` = caption, optional `link` + `linkLabel` for inline URL button.
+ */
+export const sendBotAnnouncement = async (req: Request, res: Response) => {
+  const file = req.file;
+  try {
+    if (!file?.path) {
+      return res.status(400).json({
+        message: "Cover image is required (multipart field name: cover)",
+      });
+    }
+
+    const text =
+      typeof req.body.text === "string" ? req.body.text.trim() : String(req.body.text ?? "").trim();
+    if (!text) {
+      await fs.unlink(file.path).catch(() => {});
+      return res.status(400).json({ message: "text is required (caption body field)" });
+    }
+
+    const link =
+      typeof req.body.link === "string" && req.body.link.trim()
+        ? req.body.link.trim()
+        : undefined;
+    const linkLabel =
+      typeof req.body.linkLabel === "string" && req.body.linkLabel.trim()
+        ? req.body.linkLabel.trim()
+        : "Open link";
+
+    const result = await broadcastTelegramAnnouncement({
+      text,
+      coverImagePath: file.path,
+      link,
+      linkLabel,
+    });
+
+    await fs.unlink(file.path).catch(() => {});
+
+    return res.status(200).json({
+      message: "Announcement broadcast finished",
+      data: result,
+    });
+  } catch (error) {
+    if (file?.path) await fs.unlink(file.path).catch(() => {});
+    console.error("sendBotAnnouncement error:", error);
+    const message = error instanceof Error ? error.message : "Internal server error";
+    if (message.includes("link must be")) {
+      return res.status(400).json({ message });
+    }
+    return res.status(500).json({ message: "Internal server error" });
   }
 };

@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import { getAllSupportedTokens } from "../config/tokens";
 
 export const registerUser = async (req: Request, res: Response) => {
-  const { username, referralCode, premium, profilePicture, firstName } = req.body;
+  const { username, referralCode, premium, profilePicture, firstName, telegramChatId } = req.body;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -16,6 +16,12 @@ export const registerUser = async (req: Request, res: Response) => {
     if (alreadyExists) {
       await session.abortTransaction();
       session.endSession();
+      if (telegramChatId != null && telegramChatId !== "") {
+        const tid = Number(telegramChatId);
+        if (!Number.isNaN(tid)) {
+          await User.updateOne({ username }, { $set: { telegramChatId: tid } });
+        }
+      }
       return res.status(200).json({ message: "Username already exists" });
     }
 
@@ -34,6 +40,9 @@ export const registerUser = async (req: Request, res: Response) => {
       firstName,
       walletAddress: wallet.address,
       encryptedPrivateKey,
+      ...(telegramChatId != null && telegramChatId !== "" && !Number.isNaN(Number(telegramChatId))
+        ? { telegramChatId: Number(telegramChatId) }
+        : {}),
     });
 
     const initialPoints = 100;

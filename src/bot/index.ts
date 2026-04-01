@@ -90,6 +90,7 @@ bot.start(async (ctx) => {
       referralCode,
       profilePicture,
       firstName,
+      telegramChatId: ctx.chat.id,
     });
 
     if (res.status === 200 || res.status === 201) {

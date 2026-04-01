@@ -89,7 +89,13 @@ const userSchema = new mongoose.Schema(
     encryptedPrivateKey: {
       type: String,
       select: false,
-    }
+    },
+    /** Telegram private chat id — set when user /start's the bot; used for broadcast announcements. */
+    telegramChatId: {
+      type: Number,
+      sparse: true,
+      unique: true,
+    },
   },
   { timestamps: true }
 );

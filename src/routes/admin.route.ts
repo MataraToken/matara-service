@@ -11,6 +11,7 @@ import {
   updateTask,
   getTaskSubmissionsForReview,
   reviewTaskSubmission,
+  sendBotAnnouncement,
 } from "../controllers/admin.controller";
 import { isAdmin } from "../middleware/admin";
 import { taskValidator, validate } from "../middleware";
@@ -41,5 +42,14 @@ router.post("/tasks/:slug/reopen", isAdmin, adminIPWhitelist(adminIPs), reopenTa
 // Task submission review routes
 router.get("/task-submissions", isAdmin, adminIPWhitelist(adminIPs), getTaskSubmissionsForReview);
 router.post("/task-submissions/:submissionId/review", isAdmin, adminIPWhitelist(adminIPs), reviewTaskSubmission);
+
+// Telegram bot broadcast (Blum-style announcement: image + caption + optional URL button)
+router.post(
+  "/bot/announcement",
+  isAdmin,
+  adminIPWhitelist(adminIPs),
+  upload.single("cover"),
+  sendBotAnnouncement
+);
 
 export default router;
